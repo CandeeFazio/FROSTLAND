@@ -1,0 +1,3 @@
+frostland.com.ar, www.frostland.com.ar, admin.frostland.com.ar {
+  reverse_proxy 127.0.0.1:8000
+}

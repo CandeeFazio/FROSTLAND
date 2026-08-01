@@ -1,0 +1,6 @@
+FROSTLAND - ACCESO ADMINISTRADOR
+
+Email: admin.frostland@local.app
+Contraseña: Nec6jnUv3Dzz#6eUey
+
+No compartas este archivo. Podés cambiar ambas variables en .env antes del primer inicio.

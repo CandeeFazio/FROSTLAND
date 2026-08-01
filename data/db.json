@@ -1,0 +1,230 @@
+{
+  "settings": {
+    "storeName": "FROSTLAND",
+    "storeAddress": "Colectora Ruta 8 km 75, Exaltación De La Cruz ",
+    "storeLat": -34.6037,
+    "storeLng": -58.3816,
+    "whatsappNumber": "1124546239",
+    "instagramUrl": "",
+    "instagramHandle": "@frostland.helados",
+    "mapsUrl": "https://www.google.com/maps/place/CADtus+arquitectura_Arq.+Florencia+Guti%C3%A9rrez/@-34.3781199,-59.1031597,312m/data=!3m1!1e3!4m6!3m5!1s0x95bb798ff5a15d5d:0x602b32016650112a!8m2!3d-34.3781244!4d-59.1018722!16s%2Fg%2F11pxm5yzvd?entry=ttu&g_ep=EgoyMDI2MDcyOS4wIKXMDSoASAFQAw%3D%3D",
+    "pointsPerPeso": 0.01,
+    "pointValue": 10,
+    "maxPointsDiscountPercent": 50,
+    "welcomePoints": 20,
+    "deliveryFee": 2500,
+    "freeDeliveryFrom": 25000,
+    "minimumOrder": 3000,
+    "adminPin": "1234",
+    "storeStatusMode": "auto",
+    "manualOpen": false,
+    "weeklyHours": {
+      "0": {
+        "enabled": true,
+        "open": "12:00",
+        "close": "23:30"
+      },
+      "1": {
+        "enabled": true,
+        "open": "12:00",
+        "close": "23:30"
+      },
+      "2": {
+        "enabled": true,
+        "open": "12:00",
+        "close": "23:30"
+      },
+      "3": {
+        "enabled": true,
+        "open": "12:00",
+        "close": "23:30"
+      },
+      "4": {
+        "enabled": true,
+        "open": "12:00",
+        "close": "23:30"
+      },
+      "5": {
+        "enabled": true,
+        "open": "12:00",
+        "close": "00:30"
+      },
+      "6": {
+        "enabled": true,
+        "open": "12:00",
+        "close": "00:30"
+      }
+    }
+  },
+  "users": [
+    {
+      "id": "af57f818-a8df-4c46-b51a-655c8b2a1291",
+      "name": "Admin FROSTLAND",
+      "email": "admin.frostland@local.app",
+      "phone": "",
+      "passwordHash": "$2b$10$/n4qRwLrx/1a89JtakIkIuKKWHdCTnIrI.dXP03QYbh4uOjSLC3NS",
+      "role": "admin",
+      "points": 0,
+      "createdAt": "2026-08-01T15:58:49.169Z"
+    },
+    {
+      "id": "7678891d-0c2b-48bd-ac0d-f2b9efbed010",
+      "name": "Candelita",
+      "email": "candebifaz@gmail.com",
+      "phone": "01124546239",
+      "passwordHash": "$2b$10$9escttnPjcwDdNsrz592c.Hhcy14pJ54MZFRsDOAk7./kbq4IjbWq",
+      "role": "customer",
+      "points": 20,
+      "createdAt": "2026-08-01T16:20:49.203Z"
+    }
+  ],
+  "products": [
+    {
+      "id": "eb9f233d-a2e0-4745-927f-68c61845a046",
+      "name": "CucuLand",
+      "price": 8000,
+      "maxFlavors": 2,
+      "active": true,
+      "imageUrl": "/uploads/1785601073175-e9a566fae8f0.png",
+      "description": "2 CUCURUCHOS"
+    }
+  ],
+  "flavors": [
+    {
+      "id": "d07fd8c1-aae0-4587-a753-ae7bc071493d",
+      "name": "chocolate fiordo",
+      "bucketStock": 1,
+      "lowBucketsAt": 1,
+      "active": true
+    }
+  ],
+  "promotions": [
+    {
+      "id": "promo-bienvenida",
+      "title": "Bienvenida",
+      "description": "Registrate y empezá a sumar puntos.",
+      "active": true
+    }
+  ],
+  "orders": [
+    {
+      "id": "2733a3b0-1346-4ba1-b727-914c9b712fc7",
+      "code": "FR-1413039",
+      "userId": "af57f818-a8df-4c46-b51a-655c8b2a1291",
+      "customer": {
+        "id": "af57f818-a8df-4c46-b51a-655c8b2a1291",
+        "name": "Admin FROSTLAND",
+        "email": "admin.frostland@local.app",
+        "phone": "",
+        "role": "admin",
+        "points": 0
+      },
+      "items": [
+        {
+          "id": "9174527d-378f-4681-b79b-94441de9cd67",
+          "productId": "eb9f233d-a2e0-4745-927f-68c61845a046",
+          "productName": "CucuLand",
+          "qty": 1,
+          "unitPrice": 8000,
+          "flavorIds": [
+            "d07fd8c1-aae0-4587-a753-ae7bc071493d"
+          ],
+          "flavorNames": [
+            "chocolate fiordo"
+          ],
+          "subtotal": 8000
+        }
+      ],
+      "subtotal": 8000,
+      "delivery": {
+        "type": "delivery",
+        "street": "Media Caña",
+        "number": "42",
+        "city": "AMBA",
+        "floor": "",
+        "notes": "",
+        "lat": -34.384384749999995,
+        "lng": -59.0838155,
+        "mapsUrl": "https://www.google.com/maps?q=-34.384384749999995,-59.0838155"
+      },
+      "deliveryFee": 2500,
+      "pointsUsed": 0,
+      "discount": 0,
+      "total": 10500,
+      "earnedPoints": 105,
+      "paymentMethod": "mercadopago",
+      "paymentStatus": "pending",
+      "status": "received",
+      "createdAt": "2026-08-01T16:23:33.043Z",
+      "updatedAt": "2026-08-01T16:24:10.386Z",
+      "inventoryDeducted": false,
+      "mpPreferenceId": "1053371263-4ba8e0bc-79df-446f-a1ca-309c56d98626",
+      "mpInitPoint": "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1053371263-4ba8e0bc-79df-446f-a1ca-309c56d98626",
+      "messages": [
+        {
+          "id": "68272324-4991-4eda-8801-304b6dae1982",
+          "userId": "af57f818-a8df-4c46-b51a-655c8b2a1291",
+          "senderName": "FROSTLAND",
+          "senderRole": "admin",
+          "text": "buenas",
+          "createdAt": "2026-08-01T16:24:10.386Z"
+        }
+      ]
+    },
+    {
+      "id": "3172de63-e96e-42c9-8655-97029f2b6c1f",
+      "code": "FR-1631314",
+      "userId": "af57f818-a8df-4c46-b51a-655c8b2a1291",
+      "customer": {
+        "id": "af57f818-a8df-4c46-b51a-655c8b2a1291",
+        "name": "Admin FROSTLAND",
+        "email": "admin.frostland@local.app",
+        "phone": "",
+        "role": "admin",
+        "points": 0
+      },
+      "items": [
+        {
+          "id": "cc6e9de7-87eb-44c0-9cc4-b949bcd414ac",
+          "productId": "eb9f233d-a2e0-4745-927f-68c61845a046",
+          "productName": "CucuLand",
+          "qty": 1,
+          "unitPrice": 8000,
+          "flavorIds": [
+            "d07fd8c1-aae0-4587-a753-ae7bc071493d"
+          ],
+          "flavorNames": [
+            "chocolate fiordo"
+          ],
+          "subtotal": 8000
+        }
+      ],
+      "subtotal": 8000,
+      "delivery": {
+        "type": "delivery",
+        "street": "Media Caña",
+        "number": "42",
+        "city": "AMBA",
+        "floor": "",
+        "notes": "",
+        "lat": -34.384384749999995,
+        "lng": -59.0838155,
+        "mapsUrl": "https://www.google.com/maps?q=-34.384384749999995,-59.0838155"
+      },
+      "deliveryFee": 2500,
+      "pointsUsed": 0,
+      "discount": 0,
+      "total": 10500,
+      "earnedPoints": 105,
+      "paymentMethod": "mercadopago",
+      "paymentStatus": "pending",
+      "status": "received",
+      "createdAt": "2026-08-01T16:27:11.315Z",
+      "updatedAt": "2026-08-01T16:27:13.154Z",
+      "inventoryDeducted": false,
+      "mpPreferenceId": "1053371263-218058f4-5e9d-46cf-b320-64d97ed5b622",
+      "mpInitPoint": "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1053371263-218058f4-5e9d-46cf-b320-64d97ed5b622"
+    }
+  ],
+  "notifications": []
+}
