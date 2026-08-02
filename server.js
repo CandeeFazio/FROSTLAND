@@ -457,6 +457,25 @@ app.put('/api/admin/orders/:id', auth, role('admin','courier'), async (req, res)
   }
   await writeDb(req.db); io.to(`order:${order.id}`).emit('order:status', { orderId: order.id, status: order.status, updatedAt: order.updatedAt }); res.json(order);
 });
+
+app.put('/api/admin/orders/:id/payment', auth, role('admin'), async (req, res) => {
+  const order = req.db.orders.find(o => o.id === req.params.id);
+  if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
+  const allowed = ['pending','pending_cash','approved','rejected','cancelled','refunded'];
+  const paymentStatus = String(req.body.paymentStatus || '');
+  if (!allowed.includes(paymentStatus)) return res.status(400).json({ error: 'Estado de pago inválido.' });
+  order.paymentStatus = paymentStatus;
+  order.updatedAt = now();
+  if (paymentStatus === 'approved' && !order.pointsCredited) {
+    const user = req.db.users.find(u => u.id === order.userId);
+    if (user) user.points = (user.points || 0) + (order.earnedPoints || 0);
+    order.pointsCredited = true;
+  }
+  await writeDb(req.db);
+  io.to(`order:${order.id}`).emit('order:status', { orderId: order.id, status: order.status, paymentStatus: order.paymentStatus, updatedAt: order.updatedAt });
+  res.json(order);
+});
+
 app.put('/api/admin/settings', auth, role('admin'), async (req, res) => {
   const body = req.body || {};
   req.db.settings = { ...req.db.settings, ...body, adminPin: req.db.settings.adminPin };

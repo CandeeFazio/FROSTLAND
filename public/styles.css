@@ -11,3 +11,48 @@
 /* Editor de contenido y productos configurables */
 .content-editor-panel{margin:24px 0}.content-editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:18px}.content-editor-grid label{display:grid;gap:7px;font-weight:700}.content-editor-grid textarea{min-height:88px;resize:vertical}.content-image-field{display:grid;gap:8px}.content-image-field img{width:100%;height:120px;object-fit:cover;border-radius:14px}.product-head{grid-template-columns:minmax(130px,1.2fr) minmax(170px,1.5fr) 90px 80px 110px 100px minmax(120px,1fr) 70px 130px}.unit-flavor-groups{display:grid;gap:14px;max-height:55vh;overflow:auto;padding:3px}.unit-flavor-group{border:1px solid rgba(0,0,0,.12);border-radius:16px;padding:14px}.unit-flavor-group legend{font-weight:900;padding:0 6px}.unit-flavor-group>small{display:block;margin-bottom:10px}.cart-row-units small,.order-item-detail small{display:block;margin-top:5px}.order-items-detail{display:grid;gap:8px;margin:10px 0}.order-item-detail{padding:9px 11px;background:rgba(0,0,0,.045);border-radius:10px}
 @media(max-width:900px){.content-editor-grid{grid-template-columns:1fr}.product-head{grid-template-columns:1fr}.inventory-head.product-head{display:none}}
+
+
+/* ===== COMANDAS Y TICKETS ===== */
+.admin-order-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.payment-badge{display:inline-flex;align-items:center;border-radius:999px;padding:6px 10px;font-size:.73rem;font-weight:900;white-space:nowrap}
+.payment-badge.paid{background:#dcebdc;color:#245d2c}
+.payment-badge.pending{background:#fff0d6;color:#875813}
+.paid-button{background:#2f7b45;color:#fff}
+.ticket-dialog{width:min(520px,96vw);background:#eee7dd;padding:18px}
+.ticket-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
+.ticket-toolbar h2{margin:0}
+.ticket-toolbar-actions{display:flex;align-items:center;gap:8px}
+.ticket-paper{width:min(80mm,100%);margin:auto;background:#fff;color:#111;padding:8mm 6mm;border-radius:4px;box-shadow:0 12px 40px #0002;font-family:"Courier New",monospace;font-size:12px;line-height:1.35}
+.ticket-brand{text-align:center}
+.ticket-brand h1{font-size:25px;letter-spacing:2px;margin:0}
+.ticket-brand p{margin:2px 0 0}
+.ticket-divider{border-top:1px dashed #111;margin:10px 0}
+.ticket-line{display:flex;justify-content:space-between;gap:12px;margin:4px 0}
+.ticket-line>span:last-child{text-align:right}
+.ticket-address,.ticket-note{margin:7px 0;padding:7px;background:#f3f3f3}
+.ticket-product{margin:9px 0}
+.ticket-unit{display:grid;grid-template-columns:auto 1fr;gap:8px;padding-left:8px;margin-top:4px}
+.ticket-unit small{text-align:right}
+.ticket-total{display:flex;align-items:end;justify-content:space-between;font-size:18px;margin-top:9px}
+.ticket-payment{display:flex;justify-content:space-between;gap:10px;padding:8px;border:2px solid #111}
+.ticket-status{text-align:center;font-weight:800;margin:10px 0}
+.ticket-thanks{text-align:center;margin:14px 0 0}
+
+@media(max-width:560px){
+  .admin-order{grid-template-columns:1fr}
+  .admin-order select{min-width:0;width:100%}
+  .admin-order-heading{flex-wrap:wrap}
+  .ticket-dialog{padding:8px}
+  .ticket-toolbar{align-items:flex-start}
+  .ticket-paper{padding:7mm 4mm}
+}
+@media print{
+  body *{visibility:hidden!important}
+  #ticketDialog,#ticketDialog *{visibility:visible!important}
+  #ticketDialog{position:absolute!important;inset:0!important;width:80mm!important;max-width:none!important;margin:0!important;padding:0!important;border:0!important;background:#fff!important}
+  #ticketDialog::backdrop{display:none!important}
+  .ticket-paper{width:80mm!important;box-shadow:none!important;border-radius:0!important;margin:0!important}
+  .no-print{display:none!important}
+  @page{size:80mm auto;margin:0}
+}

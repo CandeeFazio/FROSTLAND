@@ -1,4 +1,4 @@
-const CACHE='frostland-v7-frosty';
+const CACHE='frostland-v8-tickets';
 const ASSETS=['/','/styles.css','/app.js','/manifest.json','/pwa-install.css','/pwa-install.js','/frosty.css','/frosty.js','/pwa-splash.css','/pwa-splash.js','/icons/app-icon-v3-192.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>Promise.allSettled(ASSETS.map(x=>c.add(x)))));self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim()});
