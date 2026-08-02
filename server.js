@@ -95,6 +95,24 @@ const seed = {
   promotions: [
     { id: 'promo-bienvenida', title: 'Bienvenida', description: 'Registrate y empezá a sumar puntos.', active: true }
   ],
+  siteContent: {
+    heroSlides: [
+      { eyebrow: 'EL SABOR DE FROSTLAND', title: 'Momentos que se disfrutan cucharada a cucharada.', text: 'Armá tu combinación, elegí hasta 12 sabores y recibila donde estés.', buttonText: 'Ver la carta', buttonView: 'menu', imageUrl: 'https://images.unsplash.com/photo-1567206563064-6f60f40a2b57?auto=format&fit=crop&w=1800&q=85', active: true },
+      { eyebrow: 'BENEFICIOS', title: 'Cada compra suma puntos.', text: 'Canjealos por descuentos en tus próximos pedidos.', buttonText: 'Ver mis puntos', buttonView: 'account', imageUrl: 'https://images.unsplash.com/photo-1570197788417-0e82375c9371?auto=format&fit=crop&w=1800&q=85', active: true },
+      { eyebrow: 'DELIVERY O RETIRO', title: 'Tu helado, a tu manera.', text: 'Pedí a domicilio con ubicación o retiralo por el local.', buttonText: 'Hacer un pedido', buttonView: 'menu', imageUrl: 'https://images.unsplash.com/photo-1488900128323-21503983a07e?auto=format&fit=crop&w=1800&q=85', active: true }
+    ],
+    benefits: [
+      { number: '01', title: 'Helado artesanal', text: 'Sabores seleccionados' },
+      { number: '02', title: 'Hasta 12 gustos', text: 'Según el tamaño' },
+      { number: '03', title: 'Programa de puntos', text: 'Comprá y ahorrá' },
+      { number: '04', title: 'Delivery rápido', text: 'Seguimiento del pedido' }
+    ],
+    featuredEyebrow: 'ELEGÍ TU FAVORITO',
+    featuredTitle: 'Tamaños destacados',
+    clubEyebrow: 'FROSTLAND CLUB',
+    clubTitle: 'Más helado, más beneficios.',
+    clubText: 'Ingresá a tu cuenta para consultar puntos, pedidos y hablar con el local.'
+  },
   orders: [],
   notifications: []
 };
@@ -119,7 +137,15 @@ async function ensureDb() {
   catch { await fs.writeFile(DATA_FILE, JSON.stringify(seed, null, 2)); }
   const db = JSON.parse(await fs.readFile(DATA_FILE, 'utf8'));
   db.settings = { ...seed.settings, ...(db.settings || {}) };
-  db.products = (db.products || []).map(p => ({ active: true, imageUrl: '', description: '', ...p }));
+  db.siteContent = { ...seed.siteContent, ...(db.siteContent || {}) };
+  db.siteContent.heroSlides = Array.isArray(db.siteContent.heroSlides) ? db.siteContent.heroSlides : seed.siteContent.heroSlides;
+  db.siteContent.benefits = Array.isArray(db.siteContent.benefits) ? db.siteContent.benefits : seed.siteContent.benefits;
+  db.products = (db.products || []).map(p => ({
+    active: true, imageUrl: '', description: '', unitsPerPack: 1, unitLabel: 'unidad',
+    ...p,
+    unitsPerPack: Math.max(1, Math.min(12, Number(p.unitsPerPack || 1))),
+    unitLabel: String(p.unitLabel || 'unidad').trim() || 'unidad'
+  }));
   db.flavors = (db.flavors || []).map(f => ({ bucketStock: Number(f.bucketStock ?? f.stock ?? 0), lowBucketsAt: Number(f.lowBucketsAt ?? f.lowStockAt ?? 1), active: true, ...f }));
   db.orders ||= [];
   db.users ||= [];
@@ -128,8 +154,8 @@ async function ensureDb() {
     const adminPassword = String(process.env.ADMIN_PASSWORD || '');
     if (!adminEmail || adminPassword.length < 10) throw new Error('Configurá ADMIN_EMAIL y ADMIN_PASSWORD (mínimo 10 caracteres) en .env.');
     db.users.push({ id: uid(), name: process.env.ADMIN_NAME || 'Administración FROSTLAND', email: adminEmail, phone: '', passwordHash: await bcrypt.hash(adminPassword, 10), role: 'admin', points: 0, createdAt: now() });
-    await fs.writeFile(DATA_FILE, JSON.stringify(db, null, 2));
   }
+  await fs.writeFile(DATA_FILE, JSON.stringify(db, null, 2));
 }
 
 async function readDb() {
@@ -206,7 +232,7 @@ function storeAvailability(settings, date = new Date()) {
 
 app.get('/api/bootstrap', async (_req, res) => {
   const db = await readDb();
-  res.json({ settings: { ...db.settings, availability: storeAvailability(db.settings) }, products: db.products.filter(x => x.active).map(({ stock, lowStockAt, ...p }) => p), flavors: db.flavors.filter(x => x.active).map(f => ({ id: f.id, name: f.name, active: f.active, available: Number(f.bucketStock || 0) > 0 })), promotions: db.promotions.filter(x => x.active) });
+  res.json({ settings: { ...db.settings, availability: storeAvailability(db.settings) }, products: db.products.filter(x => x.active).map(({ stock, lowStockAt, ...p }) => p), flavors: db.flavors.filter(x => x.active).map(f => ({ id: f.id, name: f.name, active: f.active, available: Number(f.bucketStock || 0) > 0 })), promotions: db.promotions.filter(x => x.active), siteContent: db.siteContent });
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -233,13 +259,32 @@ function calculateOrder(db, body, user) {
     const product = db.products.find(p => p.id === raw.productId && p.active);
     if (!product) throw new Error('Producto inválido.');
     const qty = Math.max(1, Math.min(20, Number(raw.qty) || 1));
-    const flavorIds = [...new Set(raw.flavorIds || [])];
-    if (!flavorIds.length || flavorIds.length > product.maxFlavors) throw new Error(`${product.name} permite entre 1 y ${product.maxFlavors} sabores.`);
-    const flavors = flavorIds.map(id => db.flavors.find(f => f.id === id && f.active)).filter(Boolean);
-    if (flavors.length !== flavorIds.length) throw new Error('Hay sabores inválidos o no disponibles.');
-    const unavailable = flavors.find(f => Number(f.bucketStock || 0) <= 0);
-    if (unavailable) throw new Error(`${unavailable.name} está agotado.`);
-    items.push({ id: uid(), productId: product.id, productName: product.name, qty, unitPrice: product.price, flavorIds, flavorNames: flavors.map(f => f.name), subtotal: product.price * qty });
+    const unitsPerPack = Math.max(1, Math.min(12, Number(product.unitsPerPack || 1)));
+    const expectedUnits = qty * unitsPerPack;
+    const rawUnits = Array.isArray(raw.units) ? raw.units : [];
+    let units = rawUnits;
+    if (!units.length && Array.isArray(raw.flavorIds)) {
+      units = Array.from({ length: expectedUnits }, () => ({ flavorIds: raw.flavorIds }));
+    }
+    if (units.length !== expectedUnits) throw new Error(`${product.name}: configurá los sabores de las ${expectedUnits} ${product.unitLabel || 'unidades'}.`);
+    const normalizedUnits = units.map((unit, index) => {
+      const flavorIds = [...new Set(unit.flavorIds || [])];
+      if (!flavorIds.length || flavorIds.length > product.maxFlavors) {
+        throw new Error(`${product.name}, ${product.unitLabel || 'unidad'} ${index + 1}: elegí entre 1 y ${product.maxFlavors} sabores.`);
+      }
+      const flavors = flavorIds.map(id => db.flavors.find(f => f.id === id && f.active)).filter(Boolean);
+      if (flavors.length !== flavorIds.length) throw new Error('Hay sabores inválidos o no disponibles.');
+      const unavailable = flavors.find(f => Number(f.bucketStock || 0) <= 0);
+      if (unavailable) throw new Error(`${unavailable.name} está agotado.`);
+      return { number: index + 1, flavorIds, flavorNames: flavors.map(f => f.name) };
+    });
+    items.push({
+      id: uid(), productId: product.id, productName: product.name, qty,
+      unitsPerPack, unitLabel: product.unitLabel || 'unidad', units: normalizedUnits,
+      flavorIds: normalizedUnits.flatMap(u => u.flavorIds),
+      flavorNames: normalizedUnits.flatMap(u => u.flavorNames),
+      unitPrice: product.price, subtotal: product.price * qty
+    });
   }
   if (!items.length) throw new Error('El carrito está vacío.');
   const subtotal = items.reduce((a, i) => a + i.subtotal, 0);
@@ -399,7 +444,7 @@ app.post('/api/admin/upload-image', auth, role('admin'), (req, res) => {
 app.get('/api/admin/dashboard', auth, role('admin'), (req, res) => {
   const orders = req.db.orders;
   const paid = orders.filter(o => o.paymentStatus === 'approved' || o.paymentMethod === 'cash');
-  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings });
+  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, siteContent: req.db.siteContent });
 });
 app.put('/api/admin/orders/:id', auth, role('admin','courier'), async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id); if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
@@ -425,9 +470,39 @@ app.put('/api/admin/settings', auth, role('admin'), async (req, res) => {
   await writeDb(req.db);
   res.json({ ...req.db.settings, availability: storeAvailability(req.db.settings) });
 });
-app.post('/api/admin/products', auth, role('admin'), async (req,res)=>{ const p={id:uid(),name:req.body.name,price:money(req.body.price),maxFlavors:Math.max(1,Number(req.body.maxFlavors)||1),active:true,imageUrl:String(req.body.imageUrl||'').trim(),description:String(req.body.description||'').trim()}; req.db.products.push(p); await writeDb(req.db); res.status(201).json(p); });
+app.get('/api/admin/site-content', auth, role('admin'), (req, res) => res.json(req.db.siteContent || seed.siteContent));
+app.put('/api/admin/site-content', auth, role('admin'), async (req, res) => {
+  const body = req.body || {};
+  const cleanSlide = s => ({
+    eyebrow: String(s?.eyebrow || '').slice(0, 80),
+    title: String(s?.title || '').slice(0, 180),
+    text: String(s?.text || '').slice(0, 350),
+    buttonText: String(s?.buttonText || '').slice(0, 60),
+    buttonView: ['shop','menu','account'].includes(s?.buttonView) ? s.buttonView : 'menu',
+    imageUrl: String(s?.imageUrl || '').trim().slice(0, 500),
+    active: s?.active !== false
+  });
+  const cleanBenefit = b => ({
+    number: String(b?.number || '').slice(0, 5),
+    title: String(b?.title || '').slice(0, 80),
+    text: String(b?.text || '').slice(0, 120)
+  });
+  req.db.siteContent = {
+    heroSlides: Array.isArray(body.heroSlides) ? body.heroSlides.slice(0, 6).map(cleanSlide) : req.db.siteContent.heroSlides,
+    benefits: Array.isArray(body.benefits) ? body.benefits.slice(0, 6).map(cleanBenefit) : req.db.siteContent.benefits,
+    featuredEyebrow: String(body.featuredEyebrow ?? req.db.siteContent.featuredEyebrow).slice(0, 80),
+    featuredTitle: String(body.featuredTitle ?? req.db.siteContent.featuredTitle).slice(0, 150),
+    clubEyebrow: String(body.clubEyebrow ?? req.db.siteContent.clubEyebrow).slice(0, 80),
+    clubTitle: String(body.clubTitle ?? req.db.siteContent.clubTitle).slice(0, 150),
+    clubText: String(body.clubText ?? req.db.siteContent.clubText).slice(0, 350)
+  };
+  await writeDb(req.db);
+  res.json(req.db.siteContent);
+});
+
+app.post('/api/admin/products', auth, role('admin'), async (req,res)=>{ const p={id:uid(),name:req.body.name,price:money(req.body.price),maxFlavors:Math.max(1,Number(req.body.maxFlavors)||1),active:true,imageUrl:String(req.body.imageUrl||'').trim(),description:String(req.body.description||'').trim(),unitsPerPack:Math.max(1,Math.min(12,Number(req.body.unitsPerPack)||1)),unitLabel:String(req.body.unitLabel||'unidad').trim()||'unidad'}; req.db.products.push(p); await writeDb(req.db); res.status(201).json(p); });
 app.delete('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const i=req.db.products.findIndex(x=>x.id===req.params.id); if(i<0)return res.status(404).json({error:'No encontrado'}); req.db.products.splice(i,1); await writeDb(req.db); res.sendStatus(204); });
-app.put('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const p=req.db.products.find(x=>x.id===req.params.id); if(!p)return res.status(404).json({error:'No encontrado'}); Object.assign(p,{name:req.body.name??p.name,price:req.body.price===undefined?p.price:money(req.body.price),maxFlavors:req.body.maxFlavors===undefined?p.maxFlavors:Math.max(1,Number(req.body.maxFlavors)),active:req.body.active===undefined?p.active:Boolean(req.body.active),imageUrl:req.body.imageUrl===undefined?p.imageUrl:String(req.body.imageUrl||'').trim(),description:req.body.description===undefined?p.description:String(req.body.description||'').trim()}); await writeDb(req.db); res.json(p); });
+app.put('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const p=req.db.products.find(x=>x.id===req.params.id); if(!p)return res.status(404).json({error:'No encontrado'}); Object.assign(p,{name:req.body.name??p.name,price:req.body.price===undefined?p.price:money(req.body.price),maxFlavors:req.body.maxFlavors===undefined?p.maxFlavors:Math.max(1,Number(req.body.maxFlavors)),active:req.body.active===undefined?p.active:Boolean(req.body.active),imageUrl:req.body.imageUrl===undefined?p.imageUrl:String(req.body.imageUrl||'').trim(),description:req.body.description===undefined?p.description:String(req.body.description||'').trim(),unitsPerPack:req.body.unitsPerPack===undefined?p.unitsPerPack:Math.max(1,Math.min(12,Number(req.body.unitsPerPack)||1)),unitLabel:req.body.unitLabel===undefined?p.unitLabel:String(req.body.unitLabel||'unidad').trim()||'unidad'}); await writeDb(req.db); res.json(p); });
 app.post('/api/admin/flavors', auth, role('admin'), async (req,res)=>{ const f={id:uid(),name:req.body.name,bucketStock:Math.max(0,Number(req.body.bucketStock)||0),lowBucketsAt:Math.max(0,Number(req.body.lowBucketsAt)||1),active:true}; req.db.flavors.push(f); await writeDb(req.db); res.status(201).json(f); });
 app.delete('/api/admin/flavors/:id', auth, role('admin'), async (req,res)=>{ const i=req.db.flavors.findIndex(x=>x.id===req.params.id); if(i<0)return res.status(404).json({error:'No encontrado'}); req.db.flavors.splice(i,1); await writeDb(req.db); res.sendStatus(204); });
 app.put('/api/admin/flavors/:id', auth, role('admin'), async (req,res)=>{ const f=req.db.flavors.find(x=>x.id===req.params.id); if(!f)return res.status(404).json({error:'No encontrado'}); Object.assign(f,{name:req.body.name??f.name,bucketStock:req.body.bucketStock===undefined?f.bucketStock:Math.max(0,Number(req.body.bucketStock)),lowBucketsAt:req.body.lowBucketsAt===undefined?f.lowBucketsAt:Math.max(0,Number(req.body.lowBucketsAt)),active:req.body.active===undefined?f.active:Boolean(req.body.active)}); await writeDb(req.db); res.json(f); });
