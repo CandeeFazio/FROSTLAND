@@ -1,8 +1,11 @@
 <!doctype html><html lang="es"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>FROSTLAND — Heladería</title><meta name="theme-color" content="#1d1713"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/styles.css">
+<title>FROSTLAND — Heladería</title><meta name="theme-color" content="#1d1713"><link rel="manifest" href="/manifest.json"><link rel="apple-touch-icon" href="/icons/apple-touch-icon-v3.png"><link rel="icon" type="image/png" href="/icons/favicon-v3.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="FROSTLAND"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/pwa-install.css">
+<link rel="stylesheet" href="/frosty.css">
+<link rel="stylesheet" href="/pwa-splash.css">
 </head><body>
+<div id="appSplash" class="app-splash" aria-hidden="true"><div class="app-splash-content"><img src="/icons/app-icon-v3-512.png" alt="" class="app-splash-icon"><div class="app-splash-title">FROSTLAND</div><div class="app-splash-subtitle">Heladería artesanal</div><div class="app-splash-loader"><span></span><span></span><span></span></div></div></div>
 <div id="storeStatusBar" class="store-status-bar">Consultando horarios…</div><header class="topbar"><a class="brand" data-view="shop"><span class="brand-mark">F</span><div><b>FROSTLAND</b><small>Heladería artesanal</small></div></a><nav><button data-view="shop">Inicio</button><button data-view="menu">Carta</button><button data-view="account" id="accountNav">Ingresar</button><button data-view="admin" id="adminNav" hidden>Administración</button><button id="cartBtn" class="cart-button">Pedido <span id="cartCount">0</span></button></nav></header>
 <main>
 <section id="shop" class="view active">
@@ -25,6 +28,15 @@
 <dialog id="chatDialog"><div class="chat-head"><div><p class="eyebrow">ATENCIÓN FROSTLAND</p><h2 id="chatTitle">Chat del pedido</h2></div><button class="close" id="closeChat">×</button></div><div id="chatMessages" class="chat-messages"></div><form id="chatForm" class="chat-form"><input id="chatInput" maxlength="500" placeholder="Escribí tu mensaje…" required><button>Enviar</button></form></dialog>
 <aside id="cart" class="drawer"><div class="drawer-head"><div><p class="eyebrow">TU SELECCIÓN</p><h2>Mi pedido</h2></div><button id="closeCart">×</button></div><div id="cartItems"></div><div id="checkout" hidden><h3>Forma de entrega</h3><div class="segmented"><label><input type="radio" name="deliveryType" value="delivery" checked> A domicilio</label><label><input type="radio" name="deliveryType" value="pickup"> Retiro</label></div><div id="addressFields" class="stack"><div class="two"><input id="street" placeholder="Calle"><input id="number" placeholder="Número"></div><input id="city" placeholder="Localidad"><div class="two"><input id="floor" placeholder="Piso/depto"><button id="locationBtn" type="button" class="secondary">Usar ubicación</button></div><textarea id="deliveryNotes" placeholder="Indicaciones para el repartidor"></textarea><p id="locationStatus"></p></div><h3>Canjear puntos</h3><p id="pointsHelp" class="points-help">Iniciá sesión para ver tus puntos.</p><input id="pointsRedeem" type="number" min="0" value="0"><div class="cart-summary"><span>Subtotal</span><b id="cartSubtotal">$0</b><span>Envío</span><b id="cartDelivery">$0</b><span>Descuento</span><b id="cartDiscount">-$0</b></div><h3>Medio de pago</h3><label class="pay-option"><input type="radio" name="payment" value="cash" checked> <span><b>Efectivo</b><small>Pagás al recibir o retirar</small></span></label><label class="pay-option"><input type="radio" name="payment" value="mercadopago"> <span><b>Mercado Pago / tarjeta</b><small>Pago seguro online</small></span></label><div class="total"><span>Total estimado</span><strong id="cartTotal">$0</strong></div><button id="submitOrder">Confirmar pedido</button></div></aside><div id="overlay"></div><div id="toast"></div>
 
+
+<button id="frostyToggle" class="frosty-toggle" type="button" aria-label="Abrir asistente Frosty"><span class="frosty-face">🍦</span><span>Frosty</span></button>
+<section id="frostyPanel" class="frosty-panel" hidden aria-label="Asistente Frosty">
+  <header class="frosty-head"><div class="frosty-avatar">🍦</div><div><strong>Frosty</strong><small>Asistente de FROSTLAND</small></div><button id="frostyClose" type="button" aria-label="Cerrar">×</button></header>
+  <div id="frostyMessages" class="frosty-messages" aria-live="polite"></div>
+  <div id="frostyQuick" class="frosty-quick"></div>
+  <form id="frostyForm" class="frosty-form"><input id="frostyInput" autocomplete="off" maxlength="180" placeholder="Preguntame por sabores, precios o delivery…" aria-label="Mensaje para Frosty"><button type="submit">Enviar</button></form>
+</section>
+
 <button id="installAppBtn" class="pwa-install-btn" type="button" hidden>
   <span aria-hidden="true">📲</span>
   <span>Instalar FROSTLAND</span>
@@ -46,4 +58,6 @@
 
 <script src="/socket.io/socket.io.js"></script><script type="module" src="/app.js"></script>
 <script src="/pwa-install.js"></script>
+<script src="/frosty.js"></script>
+<script src="/pwa-splash.js"></script>
 </body></html>
