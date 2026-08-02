@@ -1,17 +1,7 @@
 <!doctype html><html lang="es"><head>
-<meta name="theme-color" content="#1d1713">
-
-<link rel="manifest" href="/manifest.json">
-
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="icon" type="image/png" href="/icons/favicon.png">
-
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="FROSTLAND">
-
-<link rel="stylesheet" href="/styles.css">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FROSTLAND — Heladería</title><meta name="theme-color" content="#1d1713"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/pwa-install.css">
 </head><body>
 <div id="storeStatusBar" class="store-status-bar">Consultando horarios…</div><header class="topbar"><a class="brand" data-view="shop"><span class="brand-mark">F</span><div><b>FROSTLAND</b><small>Heladería artesanal</small></div></a><nav><button data-view="shop">Inicio</button><button data-view="menu">Carta</button><button data-view="account" id="accountNav">Ingresar</button><button data-view="admin" id="adminNav" hidden>Administración</button><button id="cartBtn" class="cart-button">Pedido <span id="cartCount">0</span></button></nav></header>
 <main>
@@ -34,5 +24,26 @@
 <dialog id="productDialog"><form method="dialog" id="productForm"><button class="close" value="cancel">×</button><p class="eyebrow">ARMÁ TU PEDIDO</p><h2 id="dialogTitle"></h2><p id="dialogHelp"></p><div id="flavorChoices" class="flavor-grid"></div><label>Cantidad<input id="qty" type="number" min="1" max="20" value="1"></label><button id="addToCart" type="button">Agregar al pedido</button></form></dialog>
 <dialog id="chatDialog"><div class="chat-head"><div><p class="eyebrow">ATENCIÓN FROSTLAND</p><h2 id="chatTitle">Chat del pedido</h2></div><button class="close" id="closeChat">×</button></div><div id="chatMessages" class="chat-messages"></div><form id="chatForm" class="chat-form"><input id="chatInput" maxlength="500" placeholder="Escribí tu mensaje…" required><button>Enviar</button></form></dialog>
 <aside id="cart" class="drawer"><div class="drawer-head"><div><p class="eyebrow">TU SELECCIÓN</p><h2>Mi pedido</h2></div><button id="closeCart">×</button></div><div id="cartItems"></div><div id="checkout" hidden><h3>Forma de entrega</h3><div class="segmented"><label><input type="radio" name="deliveryType" value="delivery" checked> A domicilio</label><label><input type="radio" name="deliveryType" value="pickup"> Retiro</label></div><div id="addressFields" class="stack"><div class="two"><input id="street" placeholder="Calle"><input id="number" placeholder="Número"></div><input id="city" placeholder="Localidad"><div class="two"><input id="floor" placeholder="Piso/depto"><button id="locationBtn" type="button" class="secondary">Usar ubicación</button></div><textarea id="deliveryNotes" placeholder="Indicaciones para el repartidor"></textarea><p id="locationStatus"></p></div><h3>Canjear puntos</h3><p id="pointsHelp" class="points-help">Iniciá sesión para ver tus puntos.</p><input id="pointsRedeem" type="number" min="0" value="0"><div class="cart-summary"><span>Subtotal</span><b id="cartSubtotal">$0</b><span>Envío</span><b id="cartDelivery">$0</b><span>Descuento</span><b id="cartDiscount">-$0</b></div><h3>Medio de pago</h3><label class="pay-option"><input type="radio" name="payment" value="cash" checked> <span><b>Efectivo</b><small>Pagás al recibir o retirar</small></span></label><label class="pay-option"><input type="radio" name="payment" value="mercadopago"> <span><b>Mercado Pago / tarjeta</b><small>Pago seguro online</small></span></label><div class="total"><span>Total estimado</span><strong id="cartTotal">$0</strong></div><button id="submitOrder">Confirmar pedido</button></div></aside><div id="overlay"></div><div id="toast"></div>
+
+<button id="installAppBtn" class="pwa-install-btn" type="button" hidden>
+  <span aria-hidden="true">📲</span>
+  <span>Instalar FROSTLAND</span>
+</button>
+
+<div id="iosInstallGuide" class="pwa-install-modal" hidden>
+  <div class="pwa-install-card" role="dialog" aria-modal="true" aria-labelledby="iosInstallTitle">
+    <button id="closeIosGuide" class="pwa-install-close" type="button" aria-label="Cerrar">×</button>
+    <div class="pwa-install-logo">🍦</div>
+    <h2 id="iosInstallTitle">Instalá FROSTLAND</h2>
+    <p>En iPhone se instala desde Safari:</p>
+    <ol>
+      <li>Tocá <b>Compartir</b> <span aria-hidden="true">⬆️</span></li>
+      <li>Elegí <b>Agregar a pantalla de inicio</b></li>
+      <li>Tocá <b>Agregar</b></li>
+    </ol>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script><script type="module" src="/app.js"></script>
+<script src="/pwa-install.js"></script>
 </body></html>
