@@ -79,6 +79,29 @@ const seed = {
     adminPin: '1234',
     storeStatusMode: 'auto',
     manualOpen: false,
+    siteContent: {
+      hero1Eyebrow: 'EL SABOR DE FROSTLAND',
+      hero1Title: 'Momentos que se disfrutan cucharada a cucharada.',
+      hero1Text: 'Armá tu combinación, elegí hasta 12 sabores y recibila donde estés.',
+      hero1Button: 'Ver la carta',
+      hero1Image: 'https://images.unsplash.com/photo-1567206563064-6f60f40a2b57?auto=format&fit=crop&w=1800&q=85',
+      hero2Eyebrow: 'BENEFICIOS',
+      hero2Title: 'Cada compra suma puntos.',
+      hero2Text: 'Canjealos por descuentos en tus próximos pedidos.',
+      hero2Button: 'Ver mis puntos',
+      hero2Image: 'https://images.unsplash.com/photo-1570197788417-0e82375c9371?auto=format&fit=crop&w=1800&q=85',
+      hero3Eyebrow: 'DELIVERY O RETIRO',
+      hero3Title: 'Tu helado, a tu manera.',
+      hero3Text: 'Pedí a domicilio con ubicación o retiralo por el local.',
+      hero3Button: 'Hacer un pedido',
+      hero3Image: 'https://images.unsplash.com/photo-1488900128323-21503983a07e?auto=format&fit=crop&w=1800&q=85',
+      benefit1Title: 'Helado artesanal', benefit1Text: 'Sabores seleccionados',
+      benefit2Title: 'Hasta 12 gustos', benefit2Text: 'Según el tamaño',
+      benefit3Title: 'Programa de puntos', benefit3Text: 'Comprá y ahorrá',
+      benefit4Title: 'Delivery rápido', benefit4Text: 'Seguimiento del pedido',
+      featuredEyebrow: 'ELEGÍ TU FAVORITO', featuredTitle: 'Tamaños destacados', featuredButton: 'Ver toda la carta →',
+      clubEyebrow: 'FROSTLAND CLUB', clubTitle: 'Más helado, más beneficios.', clubText: 'Ingresá a tu cuenta para consultar puntos, pedidos y hablar con el local.'
+    },
     weeklyHours: {
       0: { enabled: true, open: '12:00', close: '23:30' },
       1: { enabled: true, open: '12:00', close: '23:30' },
@@ -95,24 +118,6 @@ const seed = {
   promotions: [
     { id: 'promo-bienvenida', title: 'Bienvenida', description: 'Registrate y empezá a sumar puntos.', active: true }
   ],
-  siteContent: {
-    heroSlides: [
-      { eyebrow: 'EL SABOR DE FROSTLAND', title: 'Momentos que se disfrutan cucharada a cucharada.', text: 'Armá tu combinación, elegí hasta 12 sabores y recibila donde estés.', buttonText: 'Ver la carta', buttonView: 'menu', imageUrl: 'https://images.unsplash.com/photo-1567206563064-6f60f40a2b57?auto=format&fit=crop&w=1800&q=85', active: true },
-      { eyebrow: 'BENEFICIOS', title: 'Cada compra suma puntos.', text: 'Canjealos por descuentos en tus próximos pedidos.', buttonText: 'Ver mis puntos', buttonView: 'account', imageUrl: 'https://images.unsplash.com/photo-1570197788417-0e82375c9371?auto=format&fit=crop&w=1800&q=85', active: true },
-      { eyebrow: 'DELIVERY O RETIRO', title: 'Tu helado, a tu manera.', text: 'Pedí a domicilio con ubicación o retiralo por el local.', buttonText: 'Hacer un pedido', buttonView: 'menu', imageUrl: 'https://images.unsplash.com/photo-1488900128323-21503983a07e?auto=format&fit=crop&w=1800&q=85', active: true }
-    ],
-    benefits: [
-      { number: '01', title: 'Helado artesanal', text: 'Sabores seleccionados' },
-      { number: '02', title: 'Hasta 12 gustos', text: 'Según el tamaño' },
-      { number: '03', title: 'Programa de puntos', text: 'Comprá y ahorrá' },
-      { number: '04', title: 'Delivery rápido', text: 'Seguimiento del pedido' }
-    ],
-    featuredEyebrow: 'ELEGÍ TU FAVORITO',
-    featuredTitle: 'Tamaños destacados',
-    clubEyebrow: 'FROSTLAND CLUB',
-    clubTitle: 'Más helado, más beneficios.',
-    clubText: 'Ingresá a tu cuenta para consultar puntos, pedidos y hablar con el local.'
-  },
   orders: [],
   notifications: []
 };
@@ -137,15 +142,8 @@ async function ensureDb() {
   catch { await fs.writeFile(DATA_FILE, JSON.stringify(seed, null, 2)); }
   const db = JSON.parse(await fs.readFile(DATA_FILE, 'utf8'));
   db.settings = { ...seed.settings, ...(db.settings || {}) };
-  db.siteContent = { ...seed.siteContent, ...(db.siteContent || {}) };
-  db.siteContent.heroSlides = Array.isArray(db.siteContent.heroSlides) ? db.siteContent.heroSlides : seed.siteContent.heroSlides;
-  db.siteContent.benefits = Array.isArray(db.siteContent.benefits) ? db.siteContent.benefits : seed.siteContent.benefits;
-  db.products = (db.products || []).map(p => ({
-    active: true, imageUrl: '', description: '', unitsPerPack: 1, unitLabel: 'unidad',
-    ...p,
-    unitsPerPack: Math.max(1, Math.min(12, Number(p.unitsPerPack || 1))),
-    unitLabel: String(p.unitLabel || 'unidad').trim() || 'unidad'
-  }));
+  db.settings.siteContent = { ...seed.settings.siteContent, ...(db.settings.siteContent || {}) };
+  db.products = (db.products || []).map(p => ({ active: true, imageUrl: '', description: '', unitsIncluded: 1, unitLabel: 'pote', flavorsPerUnit: Number(p.maxFlavors || 1), ...p }));
   db.flavors = (db.flavors || []).map(f => ({ bucketStock: Number(f.bucketStock ?? f.stock ?? 0), lowBucketsAt: Number(f.lowBucketsAt ?? f.lowStockAt ?? 1), active: true, ...f }));
   db.orders ||= [];
   db.users ||= [];
@@ -154,8 +152,8 @@ async function ensureDb() {
     const adminPassword = String(process.env.ADMIN_PASSWORD || '');
     if (!adminEmail || adminPassword.length < 10) throw new Error('Configurá ADMIN_EMAIL y ADMIN_PASSWORD (mínimo 10 caracteres) en .env.');
     db.users.push({ id: uid(), name: process.env.ADMIN_NAME || 'Administración FROSTLAND', email: adminEmail, phone: '', passwordHash: await bcrypt.hash(adminPassword, 10), role: 'admin', points: 0, createdAt: now() });
+    await fs.writeFile(DATA_FILE, JSON.stringify(db, null, 2));
   }
-  await fs.writeFile(DATA_FILE, JSON.stringify(db, null, 2));
 }
 
 async function readDb() {
@@ -232,7 +230,7 @@ function storeAvailability(settings, date = new Date()) {
 
 app.get('/api/bootstrap', async (_req, res) => {
   const db = await readDb();
-  res.json({ settings: { ...db.settings, availability: storeAvailability(db.settings) }, products: db.products.filter(x => x.active).map(({ stock, lowStockAt, ...p }) => p), flavors: db.flavors.filter(x => x.active).map(f => ({ id: f.id, name: f.name, active: f.active, available: Number(f.bucketStock || 0) > 0 })), promotions: db.promotions.filter(x => x.active), siteContent: db.siteContent });
+  res.json({ settings: { ...db.settings, availability: storeAvailability(db.settings) }, products: db.products.filter(x => x.active).map(({ stock, lowStockAt, ...p }) => p), flavors: db.flavors.filter(x => x.active).map(f => ({ id: f.id, name: f.name, active: f.active, available: Number(f.bucketStock || 0) > 0 })), promotions: db.promotions.filter(x => x.active) });
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -259,31 +257,31 @@ function calculateOrder(db, body, user) {
     const product = db.products.find(p => p.id === raw.productId && p.active);
     if (!product) throw new Error('Producto inválido.');
     const qty = Math.max(1, Math.min(20, Number(raw.qty) || 1));
-    const unitsPerPack = Math.max(1, Math.min(12, Number(product.unitsPerPack || 1)));
-    const expectedUnits = qty * unitsPerPack;
-    const rawUnits = Array.isArray(raw.units) ? raw.units : [];
-    let units = rawUnits;
+    const unitsIncluded = Math.max(1, Math.min(20, Number(product.unitsIncluded) || 1));
+    const flavorsPerUnit = Math.max(1, Math.min(12, Number(product.flavorsPerUnit || product.maxFlavors) || 1));
+    const totalUnits = qty * unitsIncluded;
+    let units = Array.isArray(raw.units) ? raw.units : [];
+    // Compatibilidad con carritos anteriores.
     if (!units.length && Array.isArray(raw.flavorIds)) {
-      units = Array.from({ length: expectedUnits }, () => ({ flavorIds: raw.flavorIds }));
+      units = Array.from({ length: totalUnits }, () => ({ flavorIds: raw.flavorIds }));
     }
-    if (units.length !== expectedUnits) throw new Error(`${product.name}: configurá los sabores de las ${expectedUnits} ${product.unitLabel || 'unidades'}.`);
+    if (units.length !== totalUnits) throw new Error(`${product.name}: completá los sabores de cada ${product.unitLabel || 'unidad'}.`);
     const normalizedUnits = units.map((unit, index) => {
       const flavorIds = [...new Set(unit.flavorIds || [])];
-      if (!flavorIds.length || flavorIds.length > product.maxFlavors) {
-        throw new Error(`${product.name}, ${product.unitLabel || 'unidad'} ${index + 1}: elegí entre 1 y ${product.maxFlavors} sabores.`);
-      }
+      if (!flavorIds.length || flavorIds.length > flavorsPerUnit) throw new Error(`${product.name}, ${product.unitLabel || 'unidad'} ${index + 1}: elegí entre 1 y ${flavorsPerUnit} sabores.`);
       const flavors = flavorIds.map(id => db.flavors.find(f => f.id === id && f.active)).filter(Boolean);
       if (flavors.length !== flavorIds.length) throw new Error('Hay sabores inválidos o no disponibles.');
       const unavailable = flavors.find(f => Number(f.bucketStock || 0) <= 0);
       if (unavailable) throw new Error(`${unavailable.name} está agotado.`);
-      return { number: index + 1, flavorIds, flavorNames: flavors.map(f => f.name) };
+      return { index: index + 1, flavorIds, flavorNames: flavors.map(f => f.name) };
     });
     items.push({
       id: uid(), productId: product.id, productName: product.name, qty,
-      unitsPerPack, unitLabel: product.unitLabel || 'unidad', units: normalizedUnits,
-      flavorIds: normalizedUnits.flatMap(u => u.flavorIds),
-      flavorNames: normalizedUnits.flatMap(u => u.flavorNames),
-      unitPrice: product.price, subtotal: product.price * qty
+      unitPrice: product.price, subtotal: product.price * qty,
+      unitsIncluded, unitLabel: product.unitLabel || 'unidad', flavorsPerUnit,
+      units: normalizedUnits,
+      flavorIds: [...new Set(normalizedUnits.flatMap(u => u.flavorIds))],
+      flavorNames: [...new Set(normalizedUnits.flatMap(u => u.flavorNames))]
     });
   }
   if (!items.length) throw new Error('El carrito está vacío.');
@@ -444,7 +442,7 @@ app.post('/api/admin/upload-image', auth, role('admin'), (req, res) => {
 app.get('/api/admin/dashboard', auth, role('admin'), (req, res) => {
   const orders = req.db.orders;
   const paid = orders.filter(o => o.paymentStatus === 'approved' || o.paymentMethod === 'cash');
-  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, siteContent: req.db.siteContent });
+  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings });
 });
 app.put('/api/admin/orders/:id', auth, role('admin','courier'), async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id); if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
@@ -463,6 +461,7 @@ app.put('/api/admin/settings', auth, role('admin'), async (req, res) => {
   const body = req.body || {};
   req.db.settings = { ...req.db.settings, ...body, adminPin: req.db.settings.adminPin };
   if (body.weeklyHours && typeof body.weeklyHours === 'object') req.db.settings.weeklyHours = body.weeklyHours;
+  if (body.siteContent && typeof body.siteContent === 'object') req.db.settings.siteContent = { ...seed.settings.siteContent, ...(req.db.settings.siteContent || {}), ...body.siteContent };
   for (const key of ['deliveryFee','freeDeliveryFrom','minimumOrder','pointValue','welcomePoints']) req.db.settings[key] = Math.max(0, money(req.db.settings[key]));
   req.db.settings.pointsPerPeso = Math.max(0, Number(req.db.settings.pointsPerPeso) || 0);
   req.db.settings.maxPointsDiscountPercent = Math.min(100, Math.max(0, Number(req.db.settings.maxPointsDiscountPercent ?? 50)));
@@ -470,39 +469,9 @@ app.put('/api/admin/settings', auth, role('admin'), async (req, res) => {
   await writeDb(req.db);
   res.json({ ...req.db.settings, availability: storeAvailability(req.db.settings) });
 });
-app.get('/api/admin/site-content', auth, role('admin'), (req, res) => res.json(req.db.siteContent || seed.siteContent));
-app.put('/api/admin/site-content', auth, role('admin'), async (req, res) => {
-  const body = req.body || {};
-  const cleanSlide = s => ({
-    eyebrow: String(s?.eyebrow || '').slice(0, 80),
-    title: String(s?.title || '').slice(0, 180),
-    text: String(s?.text || '').slice(0, 350),
-    buttonText: String(s?.buttonText || '').slice(0, 60),
-    buttonView: ['shop','menu','account'].includes(s?.buttonView) ? s.buttonView : 'menu',
-    imageUrl: String(s?.imageUrl || '').trim().slice(0, 500),
-    active: s?.active !== false
-  });
-  const cleanBenefit = b => ({
-    number: String(b?.number || '').slice(0, 5),
-    title: String(b?.title || '').slice(0, 80),
-    text: String(b?.text || '').slice(0, 120)
-  });
-  req.db.siteContent = {
-    heroSlides: Array.isArray(body.heroSlides) ? body.heroSlides.slice(0, 6).map(cleanSlide) : req.db.siteContent.heroSlides,
-    benefits: Array.isArray(body.benefits) ? body.benefits.slice(0, 6).map(cleanBenefit) : req.db.siteContent.benefits,
-    featuredEyebrow: String(body.featuredEyebrow ?? req.db.siteContent.featuredEyebrow).slice(0, 80),
-    featuredTitle: String(body.featuredTitle ?? req.db.siteContent.featuredTitle).slice(0, 150),
-    clubEyebrow: String(body.clubEyebrow ?? req.db.siteContent.clubEyebrow).slice(0, 80),
-    clubTitle: String(body.clubTitle ?? req.db.siteContent.clubTitle).slice(0, 150),
-    clubText: String(body.clubText ?? req.db.siteContent.clubText).slice(0, 350)
-  };
-  await writeDb(req.db);
-  res.json(req.db.siteContent);
-});
-
-app.post('/api/admin/products', auth, role('admin'), async (req,res)=>{ const p={id:uid(),name:req.body.name,price:money(req.body.price),maxFlavors:Math.max(1,Number(req.body.maxFlavors)||1),active:true,imageUrl:String(req.body.imageUrl||'').trim(),description:String(req.body.description||'').trim(),unitsPerPack:Math.max(1,Math.min(12,Number(req.body.unitsPerPack)||1)),unitLabel:String(req.body.unitLabel||'unidad').trim()||'unidad'}; req.db.products.push(p); await writeDb(req.db); res.status(201).json(p); });
+app.post('/api/admin/products', auth, role('admin'), async (req,res)=>{ const maxFlavors=Math.max(1,Number(req.body.maxFlavors)||1); const p={id:uid(),name:req.body.name,price:money(req.body.price),maxFlavors,unitsIncluded:Math.max(1,Number(req.body.unitsIncluded)||1),unitLabel:String(req.body.unitLabel||'pote').trim()||'pote',flavorsPerUnit:Math.max(1,Number(req.body.flavorsPerUnit)||maxFlavors),active:true,imageUrl:String(req.body.imageUrl||'').trim(),description:String(req.body.description||'').trim()}; req.db.products.push(p); await writeDb(req.db); res.status(201).json(p); });
 app.delete('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const i=req.db.products.findIndex(x=>x.id===req.params.id); if(i<0)return res.status(404).json({error:'No encontrado'}); req.db.products.splice(i,1); await writeDb(req.db); res.sendStatus(204); });
-app.put('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const p=req.db.products.find(x=>x.id===req.params.id); if(!p)return res.status(404).json({error:'No encontrado'}); Object.assign(p,{name:req.body.name??p.name,price:req.body.price===undefined?p.price:money(req.body.price),maxFlavors:req.body.maxFlavors===undefined?p.maxFlavors:Math.max(1,Number(req.body.maxFlavors)),active:req.body.active===undefined?p.active:Boolean(req.body.active),imageUrl:req.body.imageUrl===undefined?p.imageUrl:String(req.body.imageUrl||'').trim(),description:req.body.description===undefined?p.description:String(req.body.description||'').trim(),unitsPerPack:req.body.unitsPerPack===undefined?p.unitsPerPack:Math.max(1,Math.min(12,Number(req.body.unitsPerPack)||1)),unitLabel:req.body.unitLabel===undefined?p.unitLabel:String(req.body.unitLabel||'unidad').trim()||'unidad'}); await writeDb(req.db); res.json(p); });
+app.put('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const p=req.db.products.find(x=>x.id===req.params.id); if(!p)return res.status(404).json({error:'No encontrado'}); Object.assign(p,{name:req.body.name??p.name,price:req.body.price===undefined?p.price:money(req.body.price),maxFlavors:req.body.maxFlavors===undefined?p.maxFlavors:Math.max(1,Number(req.body.maxFlavors)),unitsIncluded:req.body.unitsIncluded===undefined?p.unitsIncluded:Math.max(1,Number(req.body.unitsIncluded)),unitLabel:req.body.unitLabel===undefined?p.unitLabel:String(req.body.unitLabel||'unidad').trim()||'unidad',flavorsPerUnit:req.body.flavorsPerUnit===undefined?p.flavorsPerUnit:Math.max(1,Number(req.body.flavorsPerUnit)),active:req.body.active===undefined?p.active:Boolean(req.body.active),imageUrl:req.body.imageUrl===undefined?p.imageUrl:String(req.body.imageUrl||'').trim(),description:req.body.description===undefined?p.description:String(req.body.description||'').trim()}); await writeDb(req.db); res.json(p); });
 app.post('/api/admin/flavors', auth, role('admin'), async (req,res)=>{ const f={id:uid(),name:req.body.name,bucketStock:Math.max(0,Number(req.body.bucketStock)||0),lowBucketsAt:Math.max(0,Number(req.body.lowBucketsAt)||1),active:true}; req.db.flavors.push(f); await writeDb(req.db); res.status(201).json(f); });
 app.delete('/api/admin/flavors/:id', auth, role('admin'), async (req,res)=>{ const i=req.db.flavors.findIndex(x=>x.id===req.params.id); if(i<0)return res.status(404).json({error:'No encontrado'}); req.db.flavors.splice(i,1); await writeDb(req.db); res.sendStatus(204); });
 app.put('/api/admin/flavors/:id', auth, role('admin'), async (req,res)=>{ const f=req.db.flavors.find(x=>x.id===req.params.id); if(!f)return res.status(404).json({error:'No encontrado'}); Object.assign(f,{name:req.body.name??f.name,bucketStock:req.body.bucketStock===undefined?f.bucketStock:Math.max(0,Number(req.body.bucketStock)),lowBucketsAt:req.body.lowBucketsAt===undefined?f.lowBucketsAt:Math.max(0,Number(req.body.lowBucketsAt)),active:req.body.active===undefined?f.active:Boolean(req.body.active)}); await writeDb(req.db); res.json(f); });
