@@ -73,6 +73,37 @@ async function openChat(id,code){state.chatOrder=id;$('#chatTitle').textContent=
 async function loadMessages(){if(!state.chatOrder)return;const ms=await api(`/api/orders/${state.chatOrder}/messages`);$('#chatMessages').innerHTML=ms.length?ms.map(m=>`<div class="message ${m.userId===state.user.id?'mine':''}"><b>${m.senderName}</b><div>${escapeHtml(m.text)}</div><small>${new Date(m.createdAt).toLocaleString('es-AR')}</small></div>`).join(''):'<p>No hay mensajes todavía. Escribí para iniciar la conversación.</p>';$('#chatMessages').scrollTop=$('#chatMessages').scrollHeight}
 async function sendChat(e){e.preventDefault();const text=$('#chatInput').value.trim();if(!text)return;await api(`/api/orders/${state.chatOrder}/messages`,{method:'POST',body:JSON.stringify({text})});$('#chatInput').value='';await loadMessages();if(state.user.role==='admin')loadAdmin()}
 function escapeHtml(s){return s.replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+
+function renderInventory(d){
+  $('#adminProducts').innerHTML=d.products.length?d.products.map(p=>`<div class="inventory-row product-head">
+    <input value="${escapeAttr(p.name)}" data-pname="${p.id}">
+    <textarea data-pdesc="${p.id}" placeholder="Descripción">${escapeHtml(p.description||'')}</textarea>
+    <input type="number" min="0" value="${p.price}" data-pprice="${p.id}">
+    <input type="number" min="1" value="${Number(p.unitsIncluded||1)}" data-punits="${p.id}">
+    <input value="${escapeAttr(p.unitLabel||'pote')}" data-plabel="${p.id}">
+    <input type="number" min="1" max="12" value="${Number(p.flavorsPerUnit||p.maxFlavors||1)}" data-pflavors="${p.id}">
+    <label class="image-upload-cell">${p.imageUrl?`<img src="${p.imageUrl}" alt="">`:''}<span>Cambiar foto</span><input type="file" accept="image/*" data-pfile="${p.id}"></label>
+    <label><input type="checkbox" data-pactive="${p.id}" ${p.active?'checked':''}> Sí</label>
+    <div class="row-actions"><button class="mini" data-psave="${p.id}">Guardar</button><button class="mini danger" data-pdelete="${p.id}">Eliminar</button></div>
+  </div>`).join(''):'<p class="empty-admin">Todavía no cargaste productos.</p>';
+
+  $('#adminFlavors').innerHTML=d.flavors.length?d.flavors.map(f=>`<div class="inventory-row flavor-head ${stockClass(f)}">
+    <input value="${escapeAttr(f.name)}" data-fname="${f.id}">
+    <input type="number" min="0" step="1" value="${Number(f.bucketStock||0)}" data-fbuckets="${f.id}">
+    <input type="number" min="0" step="1" value="${Number(f.lowBucketsAt??1)}" data-flowbuckets="${f.id}">
+    <label><input type="checkbox" data-factive="${f.id}" ${f.active?'checked':''}> Sí</label>
+    <div class="row-actions"><button class="mini secondary" data-adjust="flavor:${f.id}:-1">−1 balde</button><button class="mini secondary" data-adjust="flavor:${f.id}:1">+1 balde</button></div>
+    <div class="row-actions"><button class="mini" data-fsave="${f.id}">Guardar</button><button class="mini danger" data-fdelete="${f.id}">Eliminar</button></div>
+  </div>`).join(''):'<p class="empty-admin">Todavía no cargaste sabores.</p>';
+
+  $$('[data-psave]').forEach(b=>b.onclick=()=>saveProduct(b.dataset.psave));
+  $$('[data-fsave]').forEach(b=>b.onclick=()=>saveFlavor(b.dataset.fsave));
+  $$('[data-adjust]').forEach(b=>b.onclick=()=>adjustStock(...b.dataset.adjust.split(':')));
+  $$('[data-pdelete]').forEach(b=>b.onclick=()=>deleteProduct(b.dataset.pdelete));
+  $$('[data-fdelete]').forEach(b=>b.onclick=()=>deleteFlavor(b.dataset.fdelete));
+  $$('[data-pfile]').forEach(i=>i.onchange=()=>uploadProductImage(i.dataset.pfile,i.files[0]));
+}
+
 function stockClass(item){if(!item.active)return'inactive-stock';if(Number(item.bucketStock)<=0)return'out-stock';if(Number(item.bucketStock)<=Number(item.lowBucketsAt||0))return'low-stock';return'ok-stock'}
 async function refreshData(){state.data=await api('/api/bootstrap');renderSiteContent();renderShop();renderMenu();renderFooter();renderCart();await loadAdmin()}
 async function adjustStock(type,id,delta){await api(`/api/admin/inventory/${type}/${id}/adjust`,{method:'POST',body:JSON.stringify({delta:Number(delta)})});await refreshData();toast('Stock de baldes actualizado')}
