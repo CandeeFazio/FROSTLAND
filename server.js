@@ -79,6 +79,7 @@ const seed = {
     adminPin: '1234',
     storeStatusMode: 'auto',
     manualOpen: false,
+    promoFlyer: { active: false, title: '', text: '', imageUrl: '', buttonText: '', buttonUrl: '', frequency: 'daily', startAt: '', endAt: '' },
     siteContent: {
       hero1Eyebrow: 'EL SABOR DE FROSTLAND',
       hero1Title: 'Momentos que se disfrutan cucharada a cucharada.',
@@ -119,7 +120,10 @@ const seed = {
     { id: 'promo-bienvenida', title: 'Bienvenida', description: 'Registrate y empezá a sumar puntos.', active: true }
   ],
   orders: [],
-  notifications: []
+  notifications: [],
+  cashShifts: [],
+  expenses: [],
+  auditLog: []
 };
 
 let firestore = null;
@@ -147,6 +151,20 @@ async function ensureDb() {
   db.flavors = (db.flavors || []).map(f => ({ bucketStock: Number(f.bucketStock ?? f.stock ?? 0), lowBucketsAt: Number(f.lowBucketsAt ?? f.lowStockAt ?? 1), active: true, ...f }));
   db.orders ||= [];
   db.users ||= [];
+  db.cashShifts ||= [];
+  db.expenses ||= [];
+  db.auditLog ||= [];
+  db.settings.promoFlyer = { ...seed.settings.promoFlyer, ...(db.settings.promoFlyer || {}) };
+  const employeeSeeds = [
+    { name: 'Nadia', email: String(process.env.EMPLOYEE_NADIA_EMAIL || 'nadia@frostland.local').toLowerCase(), password: process.env.EMPLOYEE_NADIA_PASSWORD || 'CambiarNadia2026!' },
+    { name: 'Candela', email: String(process.env.EMPLOYEE_CANDELA_EMAIL || 'candela@frostland.local').toLowerCase(), password: process.env.EMPLOYEE_CANDELA_PASSWORD || 'CambiarCandela2026!' },
+    { name: 'Daniela', email: String(process.env.EMPLOYEE_DANIELA_EMAIL || 'daniela@frostland.local').toLowerCase(), password: process.env.EMPLOYEE_DANIELA_PASSWORD || 'CambiarDaniela2026!' }
+  ];
+  for (const employee of employeeSeeds) {
+    if (!db.users.some(u => u.email === employee.email)) {
+      db.users.push({ id: uid(), name: employee.name, email: employee.email, phone: '', passwordHash: await bcrypt.hash(employee.password, 10), role: 'employee', points: 0, mustChangePassword: true, createdAt: now() });
+    }
+  }
   if (!db.users.some(u => u.role === 'admin')) {
     const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
     const adminPassword = String(process.env.ADMIN_PASSWORD || '');
@@ -198,11 +216,12 @@ io.use(async (socket, next) => {
   } catch (err) { next(new Error('Sesión inválida')); }
 });
 io.on('connection', socket => {
+  if (['admin','employee','courier'].includes(socket.user.role)) socket.join('staff');
   socket.on('chat:join', async ({ orderId }) => {
     const db = await readDb();
     const order = db.orders.find(o => o.id === orderId);
     if (!order) return socket.emit('chat:error', { message: 'Pedido inexistente.' });
-    const allowed = ['admin','courier'].includes(socket.user.role) || order.userId === socket.user.id;
+    const allowed = ['admin','employee','courier'].includes(socket.user.role) || order.userId === socket.user.id;
     if (!allowed) return socket.emit('chat:error', { message: 'Sin acceso al chat.' });
     for (const room of socket.rooms) if (room.startsWith('order:')) socket.leave(room);
     socket.join(`order:${orderId}`);
@@ -329,13 +348,14 @@ app.post('/api/orders', auth, async (req, res) => {
     const availability = storeAvailability(req.db.settings);
     if (!availability.isOpen) throw new Error('El local está cerrado en este momento. Podés revisar los horarios y volver a pedir cuando abra.');
     const paymentMethod = req.body.paymentMethod;
-    if (!['cash','mercadopago'].includes(paymentMethod)) throw new Error('Medio de pago inválido.');
+    if (!['cash','mercadopago','qr','transfer'].includes(paymentMethod)) throw new Error('Medio de pago inválido.');
     const calc = calculateOrder(req.db, req.body, req.user);
     const order = { id: uid(), code: `FR-${Date.now().toString().slice(-7)}`, userId: req.user.id, customer: publicUser(req.user), ...calc, paymentMethod, paymentStatus: paymentMethod === 'cash' ? 'pending_cash' : 'pending', status: 'received', createdAt: now(), updatedAt: now() };
     req.db.orders.push(order);
     req.user.points = Math.max(0, (req.user.points || 0) - calc.pointsUsed);
     order.inventoryDeducted = false;
     await writeDb(req.db);
+    io.to('staff').emit('admin:new-order', { order: { id: order.id, code: order.code, total: order.total, paymentMethod: order.paymentMethod, createdAt: order.createdAt } });
 
     if (paymentMethod === 'mercadopago') {
       const mpAccessToken = String(process.env.MP_ACCESS_TOKEN || '').trim();
@@ -392,7 +412,7 @@ app.post('/api/mercadopago/webhook', async (req, res) => {
     if (payment.status === 'approved' && !order.pointsCredited) {
       const user = db.users.find(u => u.id === order.userId);
       if (user) user.points = (user.points || 0) + order.earnedPoints;
-      order.pointsCredited = true; order.status = 'confirmed';
+      order.pointsCredited = true;
     } else if (['rejected','cancelled'].includes(payment.status)) {
       restoreOrderResources(db, order);
       order.status = 'cancelled';
@@ -405,17 +425,17 @@ app.post('/api/mercadopago/webhook', async (req, res) => {
 app.get('/api/orders/:id/messages', auth, (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id);
   if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
-  if (req.user.role !== 'admin' && req.user.role !== 'courier' && order.userId !== req.user.id) return res.status(403).json({ error: 'No tenés acceso a este chat.' });
+  if (!['admin','employee','courier'].includes(req.user.role) && order.userId !== req.user.id) return res.status(403).json({ error: 'No tenés acceso a este chat.' });
   res.json(order.messages || []);
 });
 app.post('/api/orders/:id/messages', auth, async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id);
   if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
-  if (req.user.role !== 'admin' && req.user.role !== 'courier' && order.userId !== req.user.id) return res.status(403).json({ error: 'No tenés acceso a este chat.' });
+  if (!['admin','employee','courier'].includes(req.user.role) && order.userId !== req.user.id) return res.status(403).json({ error: 'No tenés acceso a este chat.' });
   const text = String(req.body.text || '').trim().slice(0, 500);
   if (!text) return res.status(400).json({ error: 'Escribí un mensaje.' });
   order.messages ||= [];
-  const message = { id: uid(), userId: req.user.id, senderName: req.user.role === 'admin' ? 'FROSTLAND' : req.user.name, senderRole: req.user.role, text, createdAt: now() };
+  const message = { id: uid(), userId: req.user.id, senderName: ['admin','employee'].includes(req.user.role) ? `FROSTLAND · ${req.user.name}` : req.user.name, senderRole: req.user.role, text, createdAt: now() };
   order.messages.push(message); order.updatedAt = now(); await writeDb(req.db); io.to(`order:${order.id}`).emit('chat:message', { orderId: order.id, message }); res.status(201).json(message);
 });
 
@@ -439,12 +459,12 @@ app.post('/api/admin/upload-image', auth, role('admin'), (req, res) => {
   });
 });
 
-app.get('/api/admin/dashboard', auth, role('admin'), (req, res) => {
+app.get('/api/admin/dashboard', auth, role('admin','employee'), (req, res) => {
   const orders = req.db.orders;
   const paid = orders.filter(o => o.paymentStatus === 'approved' || o.paymentMethod === 'cash');
-  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings });
+  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null, shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30), expenses: req.db.expenses.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100) });
 });
-app.put('/api/admin/orders/:id', auth, role('admin','courier'), async (req, res) => {
+app.put('/api/admin/orders/:id', auth, role('admin','employee','courier'), async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id); if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
   const allowed = ['received','confirmed','preparing','ready','on_the_way','delivered','cancelled'];
   if (!allowed.includes(req.body.status)) return res.status(400).json({ error: 'Estado inválido.' });
@@ -458,7 +478,7 @@ app.put('/api/admin/orders/:id', auth, role('admin','courier'), async (req, res)
   await writeDb(req.db); io.to(`order:${order.id}`).emit('order:status', { orderId: order.id, status: order.status, updatedAt: order.updatedAt }); res.json(order);
 });
 
-app.put('/api/admin/orders/:id/payment', auth, role('admin'), async (req, res) => {
+app.put('/api/admin/orders/:id/payment', auth, role('admin','employee'), async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id);
   if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
   const allowed = ['pending','pending_cash','approved','rejected','cancelled','refunded'];
@@ -488,6 +508,77 @@ app.put('/api/admin/settings', auth, role('admin'), async (req, res) => {
   await writeDb(req.db);
   res.json({ ...req.db.settings, availability: storeAvailability(req.db.settings) });
 });
+
+function audit(db, user, action, details = {}) {
+  db.auditLog ||= [];
+  db.auditLog.push({ id: uid(), userId: user.id, userName: user.name, action, details, createdAt: now() });
+  if (db.auditLog.length > 2000) db.auditLog = db.auditLog.slice(-2000);
+}
+function shiftTotals(db, shift) {
+  const start = new Date(shift.openedAt).getTime();
+  const end = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
+  const orders = db.orders.filter(o => { const t = new Date(o.createdAt).getTime(); return t >= start && t <= end && o.status !== 'cancelled' && (o.paymentStatus === 'approved' || ['cash','qr','transfer'].includes(o.paymentMethod)); });
+  const byMethod = { cash: 0, mercadopago: 0, qr: 0, transfer: 0 };
+  for (const o of orders) byMethod[o.paymentMethod] = (byMethod[o.paymentMethod] || 0) + Number(o.total || 0);
+  const expenses = db.expenses.filter(e => e.shiftId === shift.id);
+  const expenseByMethod = { cash: 0, mercadopago: 0, qr: 0, transfer: 0 };
+  for (const e of expenses) expenseByMethod[e.paymentMethod] = (expenseByMethod[e.paymentMethod] || 0) + Number(e.amount || 0);
+  const totalSales = Object.values(byMethod).reduce((a,b)=>a+b,0);
+  const totalExpenses = expenses.reduce((a,e)=>a+Number(e.amount||0),0);
+  const expectedCash = Number(shift.openingCash || 0) + byMethod.cash - expenseByMethod.cash;
+  return { ordersCount: orders.length, byMethod, expenses, expenseByMethod, totalSales, totalExpenses, netTotal: totalSales-totalExpenses, expectedCash };
+}
+async function mercadoPagoRefund(order) {
+  if (!order.mpPaymentId) return { status: 'not_applicable', detail: 'El pedido no tiene ID de pago de Mercado Pago.' };
+  const token = String(process.env.MP_ACCESS_TOKEN || '').trim();
+  if (!token) return { status: 'failed', detail: 'Falta MP_ACCESS_TOKEN.' };
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': `frostland-refund-${order.id}` };
+  const approved = order.paymentStatus === 'approved';
+  const url = approved ? `https://api.mercadopago.com/v1/payments/${order.mpPaymentId}/refunds` : `https://api.mercadopago.com/v1/payments/${order.mpPaymentId}`;
+  const response = await fetch(url, { method: approved ? 'POST' : 'PUT', headers, body: approved ? '{}' : JSON.stringify({ status: 'cancelled' }) });
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok) return { status: 'failed', detail: data.message || data.error || `Mercado Pago respondió ${response.status}` };
+  return { status: approved ? 'requested' : 'cancelled', detail: data.status || 'ok', mpResponseId: data.id || null };
+}
+
+app.post('/api/admin/orders/:id/accept', auth, role('admin','employee'), async (req,res)=>{
+  const order=req.db.orders.find(o=>o.id===req.params.id); if(!order)return res.status(404).json({error:'Pedido no encontrado.'});
+  if(order.status==='cancelled')return res.status(400).json({error:'El pedido está cancelado.'});
+  if(order.status==='received') order.status='confirmed';
+  order.acceptedBy={id:req.user.id,name:req.user.name}; order.acceptedAt=now(); order.updatedAt=now();
+  audit(req.db,req.user,'order.accept',{orderId:order.id,code:order.code}); await writeDb(req.db);
+  io.to(`order:${order.id}`).emit('order:status',{orderId:order.id,status:order.status,acceptedBy:order.acceptedBy,updatedAt:order.updatedAt});
+  res.json(order);
+});
+app.post('/api/admin/orders/:id/cancel', auth, role('admin','employee'), async (req,res)=>{
+  const order=req.db.orders.find(o=>o.id===req.params.id); if(!order)return res.status(404).json({error:'Pedido no encontrado.'});
+  if(order.status==='cancelled')return res.json(order);
+  const reason=String(req.body.reason||'Cancelado por el local').trim().slice(0,300);
+  let refund={status:'not_applicable',detail:'Sin cobro online'};
+  if(order.paymentMethod==='mercadopago') { try { refund=await mercadoPagoRefund(order); } catch(e){ refund={status:'failed',detail:e.message}; } }
+  order.status='cancelled'; order.cancelReason=reason; order.cancelledBy={id:req.user.id,name:req.user.name}; order.cancelledAt=now(); order.refund=refund; order.paymentStatus=refund.status==='requested'?'refund_pending':refund.status==='cancelled'?'cancelled':order.paymentStatus; order.updatedAt=now();
+  restoreOrderResources(req.db,order); audit(req.db,req.user,'order.cancel',{orderId:order.id,code:order.code,reason,refund}); await writeDb(req.db);
+  io.to(`order:${order.id}`).emit('order:status',{orderId:order.id,status:order.status,refund:order.refund,updatedAt:order.updatedAt}); res.json(order);
+});
+app.post('/api/admin/shifts/open', auth, role('admin','employee'), async (req,res)=>{
+  if(req.db.cashShifts.some(s=>!s.closedAt))return res.status(400).json({error:'Ya hay una caja abierta.'});
+  const shift={id:uid(),employeeId:req.user.id,employeeName:req.user.name,openingCash:money(req.body.openingCash),openedAt:now(),closedAt:null}; req.db.cashShifts.push(shift); audit(req.db,req.user,'cash.open',{shiftId:shift.id,openingCash:shift.openingCash}); await writeDb(req.db); res.status(201).json(shift);
+});
+app.post('/api/admin/shifts/:id/close', auth, role('admin','employee'), async (req,res)=>{
+  const shift=req.db.cashShifts.find(s=>s.id===req.params.id); if(!shift)return res.status(404).json({error:'Turno inexistente.'}); if(shift.closedAt)return res.status(400).json({error:'La caja ya está cerrada.'});
+  if(req.user.role!=='admin'&&shift.employeeId!==req.user.id)return res.status(403).json({error:'Solo podés cerrar tu propio turno.'});
+  const totals=shiftTotals(req.db,shift); shift.countedCash=money(req.body.countedCash); shift.closedAt=now(); shift.closedBy={id:req.user.id,name:req.user.name}; shift.totals=totals; shift.cashDifference=shift.countedCash-totals.expectedCash; audit(req.db,req.user,'cash.close',{shiftId:shift.id,cashDifference:shift.cashDifference}); await writeDb(req.db); res.json(shift);
+});
+app.post('/api/admin/expenses', auth, role('admin','employee'), async (req,res)=>{
+  const shift=req.db.cashShifts.find(s=>!s.closedAt); if(!shift)return res.status(400).json({error:'Abrí la caja antes de registrar gastos.'});
+  const paymentMethod=String(req.body.paymentMethod||'cash'); if(!['cash','mercadopago','qr','transfer'].includes(paymentMethod))return res.status(400).json({error:'Forma de pago inválida.'});
+  const expense={id:uid(),shiftId:shift.id,amount:money(req.body.amount),category:String(req.body.category||'Otros').slice(0,80),description:String(req.body.description||'').slice(0,300),supplier:String(req.body.supplier||'').slice(0,120),paymentMethod,createdBy:{id:req.user.id,name:req.user.name},createdAt:now()}; if(!expense.amount)return res.status(400).json({error:'Ingresá un monto.'}); req.db.expenses.push(expense); audit(req.db,req.user,'expense.create',{expenseId:expense.id,amount:expense.amount}); await writeDb(req.db); res.status(201).json(expense);
+});
+app.put('/api/admin/flyer', auth, role('admin','employee'), async (req,res)=>{
+  req.db.settings.promoFlyer={...seed.settings.promoFlyer,...req.db.settings.promoFlyer,...req.body,active:Boolean(req.body.active)}; audit(req.db,req.user,'flyer.update',{}); await writeDb(req.db); res.json(req.db.settings.promoFlyer);
+});
+app.get('/api/admin/shifts/:id/summary', auth, role('admin','employee'), (req,res)=>{const shift=req.db.cashShifts.find(s=>s.id===req.params.id);if(!shift)return res.status(404).json({error:'Turno inexistente.'});res.json({...shift,totals:shift.totals||shiftTotals(req.db,shift)});});
+
 app.post('/api/admin/products', auth, role('admin'), async (req,res)=>{ const maxFlavors=Math.max(1,Number(req.body.maxFlavors)||1); const p={id:uid(),name:req.body.name,price:money(req.body.price),maxFlavors,unitsIncluded:Math.max(1,Number(req.body.unitsIncluded)||1),unitLabel:String(req.body.unitLabel||'pote').trim()||'pote',flavorsPerUnit:Math.max(1,Number(req.body.flavorsPerUnit)||maxFlavors),active:true,imageUrl:String(req.body.imageUrl||'').trim(),description:String(req.body.description||'').trim()}; req.db.products.push(p); await writeDb(req.db); res.status(201).json(p); });
 app.delete('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const i=req.db.products.findIndex(x=>x.id===req.params.id); if(i<0)return res.status(404).json({error:'No encontrado'}); req.db.products.splice(i,1); await writeDb(req.db); res.sendStatus(204); });
 app.put('/api/admin/products/:id', auth, role('admin'), async (req,res)=>{ const p=req.db.products.find(x=>x.id===req.params.id); if(!p)return res.status(404).json({error:'No encontrado'}); Object.assign(p,{name:req.body.name??p.name,price:req.body.price===undefined?p.price:money(req.body.price),maxFlavors:req.body.maxFlavors===undefined?p.maxFlavors:Math.max(1,Number(req.body.maxFlavors)),unitsIncluded:req.body.unitsIncluded===undefined?p.unitsIncluded:Math.max(1,Number(req.body.unitsIncluded)),unitLabel:req.body.unitLabel===undefined?p.unitLabel:String(req.body.unitLabel||'unidad').trim()||'unidad',flavorsPerUnit:req.body.flavorsPerUnit===undefined?p.flavorsPerUnit:Math.max(1,Number(req.body.flavorsPerUnit)),active:req.body.active===undefined?p.active:Boolean(req.body.active),imageUrl:req.body.imageUrl===undefined?p.imageUrl:String(req.body.imageUrl||'').trim(),description:req.body.description===undefined?p.description:String(req.body.description||'').trim()}); await writeDb(req.db); res.json(p); });
@@ -506,7 +597,7 @@ app.post('/api/admin/inventory/flavor/:id/adjust', auth, role('admin'), async (r
   res.json(item);
 });
 
-app.post('/api/admin/users', auth, role('admin'), async (req,res)=>{ if(!['admin','courier'].includes(req.body.role))return res.status(400).json({error:'Rol inválido'}); const u={id:uid(),name:req.body.name,email:req.body.email.toLowerCase(),phone:req.body.phone||'',passwordHash:await bcrypt.hash(req.body.password||'frostland123',10),role:req.body.role,points:0,createdAt:now()}; req.db.users.push(u); await writeDb(req.db); res.status(201).json(publicUser(u)); });
+app.post('/api/admin/users', auth, role('admin'), async (req,res)=>{ if(!['admin','employee','courier'].includes(req.body.role))return res.status(400).json({error:'Rol inválido'}); const u={id:uid(),name:req.body.name,email:req.body.email.toLowerCase(),phone:req.body.phone||'',passwordHash:await bcrypt.hash(req.body.password||'frostland123',10),role:req.body.role,points:0,createdAt:now()}; req.db.users.push(u); await writeDb(req.db); res.status(201).json(publicUser(u)); });
 
 app.get('/{*splat}', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
