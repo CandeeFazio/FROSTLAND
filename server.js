@@ -123,7 +123,9 @@ const seed = {
   notifications: [],
   cashShifts: [],
   expenses: [],
-  auditLog: []
+  auditLog: [],
+  promoCodes: [],
+  passwordResets: []
 };
 
 let firestore = null;
@@ -154,6 +156,8 @@ async function ensureDb() {
   db.cashShifts ||= [];
   db.expenses ||= [];
   db.auditLog ||= [];
+  db.promoCodes ||= [];
+  db.passwordResets ||= [];
   db.settings.promoFlyer = { ...seed.settings.promoFlyer, ...(db.settings.promoFlyer || {}) };
   const employeeSeeds = [
     { name: 'Nadia', email: String(process.env.EMPLOYEE_NADIA_EMAIL || 'nadia@frostland.local').toLowerCase(), password: process.env.EMPLOYEE_NADIA_PASSWORD || 'CambiarNadia2026!' },
@@ -188,7 +192,7 @@ async function writeDb(db) {
   return fs.writeFile(DATA_FILE, JSON.stringify(db, null, 2));
 }
 
-function publicUser(u) { return { id: u.id, name: u.name, email: u.email, phone: u.phone, role: u.role, points: u.points || 0 }; }
+function publicUser(u) { return { id: u.id, name: u.name, email: u.email, phone: u.phone, role: u.role, points: u.points || 0, active: u.active !== false, createdAt: u.createdAt || null }; }
 function sign(u) { return jwt.sign({ sub: u.id, role: u.role }, JWT_SECRET, { expiresIn: '365d' }); }
 async function auth(req, res, next) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -267,6 +271,46 @@ app.post('/api/auth/login', async (req, res) => {
   if (!user || !(await bcrypt.compare(String(req.body.password || ''), user.passwordHash))) return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
   res.json({ token: sign(user), user: publicUser(user) });
 });
+async function sendResetEmail(to, resetUrl) {
+  const key = String(process.env.RESEND_API_KEY || '').trim();
+  const from = String(process.env.RESET_FROM_EMAIL || '').trim();
+  if (!key || !from) return false;
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to: [to], subject: 'Restablecer contraseña de FROSTLAND', html: `<h2>FROSTLAND</h2><p>Recibimos una solicitud para cambiar tu contraseña.</p><p><a href="${resetUrl}">Restablecer contraseña</a></p><p>Este enlace vence en 30 minutos.</p>` })
+  });
+  return response.ok;
+}
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const db = await readDb();
+  const user = db.users.find(u => u.email === email && u.role === 'customer');
+  if (user) {
+    const token = crypto.randomBytes(32).toString('hex');
+    db.passwordResets = (db.passwordResets || []).filter(r => r.userId !== user.id && new Date(r.expiresAt).getTime() > Date.now());
+    db.passwordResets.push({ id: uid(), userId: user.id, tokenHash: crypto.createHash('sha256').update(token).digest('hex'), expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), usedAt: null, createdAt: now() });
+    await writeDb(db);
+    const resetUrl = `${PUBLIC_URL}/?reset=${encodeURIComponent(token)}`;
+    try { await sendResetEmail(user.email, resetUrl); } catch (err) { console.error('No se pudo enviar recuperación:', err.message); }
+  }
+  res.json({ ok: true, message: 'Si existe una cuenta con ese correo, recibirá instrucciones.' });
+});
+app.post('/api/auth/reset-password', async (req, res) => {
+  const token = String(req.body.token || '');
+  const password = String(req.body.password || '');
+  if (password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+  const db = await readDb();
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  const reset = (db.passwordResets || []).find(r => r.tokenHash === hash && !r.usedAt && new Date(r.expiresAt).getTime() > Date.now());
+  if (!reset) return res.status(400).json({ error: 'El enlace es inválido o venció.' });
+  const user = db.users.find(u => u.id === reset.userId);
+  if (!user) return res.status(404).json({ error: 'Cuenta inexistente.' });
+  user.passwordHash = await bcrypt.hash(password, 10);
+  reset.usedAt = now();
+  await writeDb(db);
+  res.json({ ok: true });
+});
 app.get('/api/me', auth, (req, res) => res.json(publicUser(req.user)));
 app.get('/api/my-orders', auth, (req, res) => res.json(req.db.orders.filter(o => o.userId === req.user.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt))));
 
@@ -316,11 +360,28 @@ function calculateOrder(db, body, user) {
   const maxPointsByOrder = Math.floor(maxDiscountAmount / pointValue);
   const pointsRequested = Math.max(0, Math.floor(Number(body.pointsToRedeem) || 0));
   const pointsUsed = Math.min(pointsRequested, Math.max(0, Math.floor(user.points || 0)), maxPointsByOrder);
-  const discount = money(pointsUsed * pointValue);
+  const pointsDiscount = money(pointsUsed * pointValue);
+  let promoDiscount = 0;
+  let promoCode = null;
+  const requestedPromo = String(body.promoCode || '').trim().toUpperCase();
+  if (requestedPromo) {
+    const promo = (db.promoCodes || []).find(p => p.code === requestedPromo && p.active !== false);
+    if (!promo) throw new Error('Código promocional inválido.');
+    const current = Date.now();
+    if (promo.startAt && current < new Date(promo.startAt).getTime()) throw new Error('La promoción todavía no comenzó.');
+    if (promo.endAt && current > new Date(promo.endAt).getTime()) throw new Error('El código promocional venció.');
+    if (promo.maxUses && Number(promo.usedCount || 0) >= Number(promo.maxUses)) throw new Error('El código alcanzó el máximo de usos.');
+    if (promo.oncePerCustomer && (promo.usedBy || []).includes(user.id)) throw new Error('Ya utilizaste este código.');
+    if (subtotal < Number(promo.minimumOrder || 0)) throw new Error(`El código requiere una compra mínima de $${Number(promo.minimumOrder || 0).toLocaleString('es-AR')}.`);
+    promoDiscount = promo.type === 'percent' ? money(orderBase * Math.min(100, Math.max(0, Number(promo.value || 0))) / 100) : money(promo.value || 0);
+    promoDiscount = Math.min(promoDiscount, Math.max(0, orderBase - pointsDiscount));
+    promoCode = promo.code;
+  }
+  const discount = pointsDiscount + promoDiscount;
   const total = Math.max(0, orderBase - discount);
   if (subtotal < db.settings.minimumOrder) throw new Error(`El pedido mínimo es $${db.settings.minimumOrder.toLocaleString('es-AR')}.`);
   const earnedPoints = Math.max(0, Math.floor(total * Math.max(0, Number(db.settings.pointsPerPeso) || 0)));
-  return { items, subtotal, delivery: { type: delivery.type, street: delivery.street || '', number: delivery.number || '', city: delivery.city || '', floor: delivery.floor || '', notes: delivery.notes || '', lat: Number(delivery.lat) || null, lng: Number(delivery.lng) || null, mapsUrl: delivery.mapsUrl || '' }, deliveryFee, pointsUsed, discount, total, earnedPoints };
+  return { items, subtotal, promoCode, promoDiscount, pointsDiscount, delivery: { type: delivery.type, street: delivery.street || '', number: delivery.number || '', city: delivery.city || '', floor: delivery.floor || '', notes: delivery.notes || '', lat: Number(delivery.lat) || null, lng: Number(delivery.lng) || null, mapsUrl: delivery.mapsUrl || '' }, deliveryFee, pointsUsed, discount, total, earnedPoints };
 }
 
 function restoreOrderResources(db, order, { restoreInventory = true, restorePoints = true } = {}) {
@@ -352,6 +413,7 @@ app.post('/api/orders', auth, async (req, res) => {
     const calc = calculateOrder(req.db, req.body, req.user);
     const order = { id: uid(), code: `FR-${Date.now().toString().slice(-7)}`, userId: req.user.id, customer: publicUser(req.user), ...calc, paymentMethod, paymentStatus: paymentMethod === 'cash' ? 'pending_cash' : 'pending', status: 'received', createdAt: now(), updatedAt: now() };
     req.db.orders.push(order);
+    if (calc.promoCode) { const promo = (req.db.promoCodes || []).find(p => p.code === calc.promoCode); if (promo) { promo.usedCount = Number(promo.usedCount || 0) + 1; promo.usedBy ||= []; if (!promo.usedBy.includes(req.user.id)) promo.usedBy.push(req.user.id); } }
     req.user.points = Math.max(0, (req.user.points || 0) - calc.pointsUsed);
     order.inventoryDeducted = false;
     await writeDb(req.db);
@@ -462,7 +524,7 @@ app.post('/api/admin/upload-image', auth, role('admin'), (req, res) => {
 app.get('/api/admin/dashboard', auth, role('admin','employee'), (req, res) => {
   const orders = req.db.orders;
   const paid = orders.filter(o => o.paymentStatus === 'approved' || o.paymentMethod === 'cash');
-  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null, shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30), expenses: req.db.expenses.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100) });
+  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null, shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30), expenses: req.db.expenses.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100), promoCodes: req.db.promoCodes || [], auditLog: (req.db.auditLog || []).slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,200) });
 });
 app.put('/api/admin/orders/:id', auth, role('admin','employee','courier'), async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id); if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
@@ -511,6 +573,8 @@ app.put('/api/admin/settings', auth, role('admin'), async (req, res) => {
 
 function audit(db, user, action, details = {}) {
   db.auditLog ||= [];
+  db.promoCodes ||= [];
+  db.passwordResets ||= [];
   db.auditLog.push({ id: uid(), userId: user.id, userName: user.name, action, details, createdAt: now() });
   if (db.auditLog.length > 2000) db.auditLog = db.auditLog.slice(-2000);
 }
@@ -562,7 +626,7 @@ app.post('/api/admin/orders/:id/cancel', auth, role('admin','employee'), async (
 });
 app.post('/api/admin/shifts/open', auth, role('admin','employee'), async (req,res)=>{
   if(req.db.cashShifts.some(s=>!s.closedAt))return res.status(400).json({error:'Ya hay una caja abierta.'});
-  const shift={id:uid(),employeeId:req.user.id,employeeName:req.user.name,openingCash:money(req.body.openingCash),openedAt:now(),closedAt:null}; req.db.cashShifts.push(shift); audit(req.db,req.user,'cash.open',{shiftId:shift.id,openingCash:shift.openingCash}); await writeDb(req.db); res.status(201).json(shift);
+  const allowedNames=['Nadia','Candela','Daniela']; const requestedName=String(req.body.employeeName||req.user.name).trim(); const employeeName=allowedNames.includes(requestedName)?requestedName:req.user.name; const shift={id:uid(),employeeId:req.user.id,employeeName,openingCash:money(req.body.openingCash),openedAt:now(),closedAt:null}; req.db.cashShifts.push(shift); audit(req.db,req.user,'cash.open',{shiftId:shift.id,openingCash:shift.openingCash}); await writeDb(req.db); res.status(201).json(shift);
 });
 app.post('/api/admin/shifts/:id/close', auth, role('admin','employee'), async (req,res)=>{
   const shift=req.db.cashShifts.find(s=>s.id===req.params.id); if(!shift)return res.status(404).json({error:'Turno inexistente.'}); if(shift.closedAt)return res.status(400).json({error:'La caja ya está cerrada.'});
@@ -593,10 +657,39 @@ app.post('/api/admin/inventory/flavor/:id/adjust', auth, role('admin'), async (r
   if (!Number.isFinite(delta) || delta === 0) return res.status(400).json({ error: 'Ingresá un ajuste distinto de cero.' });
   item.bucketStock = Math.max(0, Number(item.bucketStock || 0) + delta);
   item.updatedAt = now();
+  audit(req.db, req.user, 'inventory.adjust', { flavorId: item.id, flavorName: item.name, delta, newStock: item.bucketStock, reason: String(req.body.reason || '').slice(0,160) });
   await writeDb(req.db);
   res.json(item);
 });
 
+app.get('/api/promos/validate/:code', auth, (req,res)=>{
+  const code=String(req.params.code||'').trim().toUpperCase();
+  const p=(req.db.promoCodes||[]).find(x=>x.code===code&&x.active!==false);
+  if(!p)return res.status(404).json({error:'Código inválido.'});
+  const t=Date.now(); if(p.startAt&&t<new Date(p.startAt).getTime())return res.status(400).json({error:'La promoción todavía no comenzó.'});
+  if(p.endAt&&t>new Date(p.endAt).getTime())return res.status(400).json({error:'El código venció.'});
+  if(p.maxUses&&Number(p.usedCount||0)>=Number(p.maxUses))return res.status(400).json({error:'El código alcanzó el máximo de usos.'});
+  if(p.oncePerCustomer&&(p.usedBy||[]).includes(req.user.id))return res.status(400).json({error:'Ya usaste este código.'});
+  res.json({code:p.code,type:p.type,value:p.value,minimumOrder:p.minimumOrder||0,description:p.description||''});
+});
+app.post('/api/admin/promos', auth, role('admin'), async (req,res)=>{
+  const code=String(req.body.code||'').trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'');
+  if(code.length<3)return res.status(400).json({error:'El código debe tener al menos 3 caracteres.'});
+  if((req.db.promoCodes||[]).some(p=>p.code===code))return res.status(409).json({error:'Ese código ya existe.'});
+  const p={id:uid(),code,description:String(req.body.description||'').slice(0,200),type:req.body.type==='fixed'?'fixed':'percent',value:Math.max(0,Number(req.body.value)||0),minimumOrder:money(req.body.minimumOrder),maxUses:Math.max(0,Math.floor(Number(req.body.maxUses)||0)),usedCount:0,usedBy:[],oncePerCustomer:Boolean(req.body.oncePerCustomer),startAt:req.body.startAt||'',endAt:req.body.endAt||'',active:req.body.active!==false,createdAt:now()};
+  req.db.promoCodes||=[];req.db.promoCodes.push(p);audit(req.db,req.user,'promo.create',{code});await writeDb(req.db);res.status(201).json(p);
+});
+app.put('/api/admin/promos/:id', auth, role('admin'), async (req,res)=>{
+  const p=(req.db.promoCodes||[]).find(x=>x.id===req.params.id);if(!p)return res.status(404).json({error:'Promoción inexistente.'});
+  Object.assign(p,{description:req.body.description===undefined?p.description:String(req.body.description||'').slice(0,200),type:req.body.type===undefined?p.type:(req.body.type==='fixed'?'fixed':'percent'),value:req.body.value===undefined?p.value:Math.max(0,Number(req.body.value)||0),minimumOrder:req.body.minimumOrder===undefined?p.minimumOrder:money(req.body.minimumOrder),maxUses:req.body.maxUses===undefined?p.maxUses:Math.max(0,Math.floor(Number(req.body.maxUses)||0)),oncePerCustomer:req.body.oncePerCustomer===undefined?p.oncePerCustomer:Boolean(req.body.oncePerCustomer),startAt:req.body.startAt===undefined?p.startAt:req.body.startAt,endAt:req.body.endAt===undefined?p.endAt:req.body.endAt,active:req.body.active===undefined?p.active:Boolean(req.body.active)});audit(req.db,req.user,'promo.update',{code:p.code});await writeDb(req.db);res.json(p);
+});
+app.delete('/api/admin/promos/:id', auth, role('admin'), async (req,res)=>{const i=(req.db.promoCodes||[]).findIndex(x=>x.id===req.params.id);if(i<0)return res.status(404).json({error:'Promoción inexistente.'});const [p]=req.db.promoCodes.splice(i,1);audit(req.db,req.user,'promo.delete',{code:p.code});await writeDb(req.db);res.sendStatus(204);});
+app.get('/api/admin/customers', auth, role('admin','employee'), (req,res)=>{
+  const customers=req.db.users.filter(u=>u.role==='customer').map(u=>{const orders=req.db.orders.filter(o=>o.userId===u.id);const valid=orders.filter(o=>o.status!=='cancelled');return {...publicUser(u),ordersCount:orders.length,totalSpent:valid.reduce((a,o)=>a+Number(o.total||0),0),lastOrderAt:orders.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0]?.createdAt||null};}).sort((a,b)=>b.totalSpent-a.totalSpent);res.json(customers);
+});
+app.put('/api/admin/customers/:id', auth, role('admin'), async (req,res)=>{const u=req.db.users.find(x=>x.id===req.params.id&&x.role==='customer');if(!u)return res.status(404).json({error:'Cliente inexistente.'});if(req.body.points!==undefined)u.points=Math.max(0,Math.floor(Number(req.body.points)||0));if(req.body.active!==undefined)u.active=Boolean(req.body.active);if(req.body.phone!==undefined)u.phone=String(req.body.phone||'').slice(0,60);audit(req.db,req.user,'customer.update',{customerId:u.id});await writeDb(req.db);res.json(publicUser(u));});
+app.post('/api/admin/customers/:id/temp-password', auth, role('admin'), async (req,res)=>{const u=req.db.users.find(x=>x.id===req.params.id&&x.role==='customer');if(!u)return res.status(404).json({error:'Cliente inexistente.'});const password=crypto.randomBytes(5).toString('base64url');u.passwordHash=await bcrypt.hash(password,10);u.mustChangePassword=true;audit(req.db,req.user,'customer.temp_password',{customerId:u.id});await writeDb(req.db);res.json({temporaryPassword:password});});
+app.get('/api/admin/finance-summary', auth, role('admin','employee'), (req,res)=>{const from=req.query.from?new Date(req.query.from).getTime():0;const to=req.query.to?new Date(req.query.to).getTime()+86400000:Date.now()+86400000;const orders=req.db.orders.filter(o=>{const t=new Date(o.createdAt).getTime();return t>=from&&t<to&&o.status!=='cancelled'&&(o.paymentStatus==='approved'||['cash','qr','transfer'].includes(o.paymentMethod));});const expenses=req.db.expenses.filter(e=>{const t=new Date(e.createdAt).getTime();return t>=from&&t<to;});const byMethod={cash:0,mercadopago:0,qr:0,transfer:0};orders.forEach(o=>byMethod[o.paymentMethod]=(byMethod[o.paymentMethod]||0)+Number(o.total||0));const totalSales=Object.values(byMethod).reduce((a,b)=>a+b,0);const totalExpenses=expenses.reduce((a,e)=>a+Number(e.amount||0),0);res.json({ordersCount:orders.length,byMethod,totalSales,totalExpenses,net:totalSales-totalExpenses,expenses});});
 app.post('/api/admin/users', auth, role('admin'), async (req,res)=>{ if(!['admin','employee','courier'].includes(req.body.role))return res.status(400).json({error:'Rol inválido'}); const u={id:uid(),name:req.body.name,email:req.body.email.toLowerCase(),phone:req.body.phone||'',passwordHash:await bcrypt.hash(req.body.password||'frostland123',10),role:req.body.role,points:0,createdAt:now()}; req.db.users.push(u); await writeDb(req.db); res.status(201).json(publicUser(u)); });
 
 app.get('/{*splat}', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
