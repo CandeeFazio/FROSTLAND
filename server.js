@@ -483,9 +483,26 @@ app.get('/api/admin/dashboard', auth, role('admin','employee'), (req, res) => {
   const realMoney = totalSales - totalExpenses;
   const customersToday = new Set(todayOrders.map(o=>o.userId || o.customer?.email || o.customer?.phone || o.customer?.name).filter(Boolean)).size;
   const pendingToday = todayOrders.filter(o=>!['delivered','cancelled'].includes(o.status)).length;
+  
+  // FROSTLAND_V62C_TOTALES_HISTORICOS
+  const historicalOrders = (req.db.orders || []).filter(o => o.status !== 'cancelled');
+  const historicalSalesOrders = historicalOrders.filter(o =>
+    o.paymentStatus === 'approved' ||
+    (o.paymentMethod === 'cash' && o.status === 'delivered')
+  );
+  const historicalSales = historicalSalesOrders.reduce((a,o)=>a+Number(o.total||0),0);
+  const historicalExpenses = (req.db.expenses || []).reduce((a,e)=>a+Number(e.amount||0),0);
+  const historicalRealMoney = historicalSales - historicalExpenses;
+
   res.json({
-    totals: { orders: todayOrders.length, sales: totalSales, customers: customersToday, pending: pendingToday, expenses: totalExpenses, realMoney, date: today },
-    orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
+    totals: {
+    orders: historicalOrders.length,
+    sales: historicalSales,
+    customers: (req.db.users || []).filter(u=>u.role==='customer').length,
+    pending: historicalOrders.filter(o=>!['delivered','cancelled'].includes(o.status)).length,
+    expenses: historicalExpenses,
+    realMoney: historicalRealMoney
+  }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
     users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings,
     activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null,
     shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30),
