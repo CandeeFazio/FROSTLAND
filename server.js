@@ -350,12 +350,20 @@ app.post('/api/orders', auth, async (req, res) => {
     const paymentMethod = req.body.paymentMethod;
     if (!['cash','mercadopago','qr','transfer'].includes(paymentMethod)) throw new Error('Medio de pago inválido.');
     const calc = calculateOrder(req.db, req.body, req.user);
-    const order = { id: uid(), code: `FR-${Date.now().toString().slice(-7)}`, userId: req.user.id, customer: publicUser(req.user), ...calc, paymentMethod, paymentStatus: paymentMethod === 'cash' ? 'pending_cash' : 'pending', status: 'received', createdAt: now(), updatedAt: now() };
+    const order = { id: uid(), code: `FR-${Date.now().toString().slice(-7)}`, userId: req.user.id, customer: publicUser(req.user), ...calc, paymentMethod, paymentStatus: paymentMethod === 'cash' ? 'pending_cash' : (['qr','transfer'].includes(paymentMethod) ? 'pending_local' : 'pending'), status: 'received', createdAt: now(), updatedAt: now() };
     req.db.orders.push(order);
     req.user.points = Math.max(0, (req.user.points || 0) - calc.pointsUsed);
     order.inventoryDeducted = false;
     await writeDb(req.db);
     io.to('staff').emit('admin:new-order', { order: { id: order.id, code: order.code, total: order.total, paymentMethod: order.paymentMethod, createdAt: order.createdAt } });
+
+    // FROSTLAND_V6_TRANSFER_WHATSAPP
+    if (paymentMethod === 'transfer') {
+      const wa = String(req.db.settings?.whatsappNumber || '').replace(/\D/g,'');
+      const msg = `Ya hice el pedido ${order.code} desde la web por ${money(order.total)}. Pasame el alias para abonar por favor.`;
+      const whatsappUrl = wa ? `https://wa.me/${wa}?text=${encodeURIComponent(msg)}` : null;
+      return res.status(201).json({ order, checkoutUrl: whatsappUrl, warning: whatsappUrl ? undefined : 'Pedido recibido. Falta configurar el WhatsApp del local.' });
+    }
 
     if (paymentMethod === 'mercadopago') {
       const mpAccessToken = String(process.env.MP_ACCESS_TOKEN || '').trim();
@@ -560,14 +568,48 @@ app.post('/api/admin/orders/:id/cancel', auth, role('admin','employee'), async (
   restoreOrderResources(req.db,order); audit(req.db,req.user,'order.cancel',{orderId:order.id,code:order.code,reason,refund}); await writeDb(req.db);
   io.to(`order:${order.id}`).emit('order:status',{orderId:order.id,status:order.status,refund:order.refund,updatedAt:order.updatedAt}); res.json(order);
 });
+
+// FROSTLAND_V6_SALES_NAV
+function frostlandSalesRange(db, shiftId) {
+  if (shiftId) {
+    const shift = (db.cashShifts || []).find(s => s.id === shiftId);
+    if (!shift) return null;
+    return { shift, start: new Date(shift.openedAt).getTime(), end: new Date(shift.closedAt || now()).getTime(), label: `${shift.employeeName || 'Turno'} · ${new Date(shift.openedAt).toLocaleDateString('es-AR')}` };
+  }
+  const active = (db.cashShifts || []).find(s => !s.closedAt);
+  if (active) return { shift: active, start: new Date(active.openedAt).getTime(), end: Date.now(), label: `Turno actual · ${active.employeeName || ''}` };
+  const arDate = new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const start = new Date(`${arDate}T00:00:00-03:00`).getTime();
+  return { shift: null, start, end: start + 86400000 - 1, label: `Hoy · ${arDate}` };
+}
+function buildSalesSnapshot(db, shiftId) {
+  const range = frostlandSalesRange(db, shiftId); if (!range) return null;
+  const orders = (db.orders || []).filter(o => { const t=new Date(o.createdAt).getTime(); return t>=range.start && t<=range.end && o.status!=='cancelled'; }).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const paidStatuses = new Set(['approved']);
+  const customersMap = new Map();
+  for (const o of orders) {
+    const key = o.userId || o.customer?.email || o.customer?.phone || o.customer?.name || o.id;
+    const c = customersMap.get(key) || { id:key, name:o.customer?.name||'Cliente', email:o.customer?.email||'', phone:o.customer?.phone||'', ordersCount:0, total:0, paid:0, lastOrderAt:o.createdAt };
+    c.ordersCount++; c.total += Number(o.total||0); if (paidStatuses.has(o.paymentStatus)) c.paid += Number(o.total||0); if(String(o.createdAt)>String(c.lastOrderAt))c.lastOrderAt=o.createdAt; customersMap.set(key,c);
+  }
+  const totalSales=orders.reduce((a,o)=>a+Number(o.total||0),0), paidTotal=orders.filter(o=>paidStatuses.has(o.paymentStatus)).reduce((a,o)=>a+Number(o.total||0),0);
+  const expenses=(db.expenses||[]).filter(e=>{const t=new Date(e.createdAt).getTime();return t>=range.start&&t<=range.end});
+  return { label:range.label, shiftId:range.shift?.id||null, from:new Date(range.start).toISOString(), to:new Date(range.end).toISOString(), ordersCount:orders.length, customersCount:customersMap.size, totalSales, paidTotal, pendingTotal:Math.max(0,totalSales-paidTotal), totalExpenses:expenses.reduce((a,e)=>a+Number(e.amount||0),0), customers:[...customersMap.values()].sort((a,b)=>b.total-a.total), orders };
+}
+app.get('/api/admin/sales-summary', auth, role('admin','employee'), (req,res)=>{
+  const shiftId=String(req.query.shiftId||'').trim();
+  if(shiftId){const shift=(req.db.cashShifts||[]).find(s=>s.id===shiftId);if(!shift)return res.status(404).json({error:'Cierre de caja no encontrado.'});if(shift.salesSnapshot)return res.json(shift.salesSnapshot);}
+  const summary=buildSalesSnapshot(req.db,shiftId||null); if(!summary)return res.status(404).json({error:'Período no encontrado.'}); res.json(summary);
+});
+
 app.post('/api/admin/shifts/open', auth, role('admin','employee'), async (req,res)=>{
   if(req.db.cashShifts.some(s=>!s.closedAt))return res.status(400).json({error:'Ya hay una caja abierta.'});
-  const shift={id:uid(),employeeId:req.user.id,employeeName:req.user.name,openingCash:money(req.body.openingCash),openedAt:now(),closedAt:null}; req.db.cashShifts.push(shift); audit(req.db,req.user,'cash.open',{shiftId:shift.id,openingCash:shift.openingCash}); await writeDb(req.db); res.status(201).json(shift);
+  const allowedNames=['Nadia','Candela','Daniela']; const requestedName=String(req.body.employeeName||'').trim(); const employeeName=allowedNames.includes(requestedName)?requestedName:req.user.name; const shift={id:uid(),employeeId:req.user.id,employeeName,openingCash:money(req.body.openingCash),openedAt:now(),closedAt:null}; req.db.cashShifts.push(shift); audit(req.db,req.user,'cash.open',{shiftId:shift.id,openingCash:shift.openingCash}); await writeDb(req.db); res.status(201).json(shift);
 });
 app.post('/api/admin/shifts/:id/close', auth, role('admin','employee'), async (req,res)=>{
   const shift=req.db.cashShifts.find(s=>s.id===req.params.id); if(!shift)return res.status(404).json({error:'Turno inexistente.'}); if(shift.closedAt)return res.status(400).json({error:'La caja ya está cerrada.'});
   if(req.user.role!=='admin'&&shift.employeeId!==req.user.id)return res.status(403).json({error:'Solo podés cerrar tu propio turno.'});
-  const totals=shiftTotals(req.db,shift); shift.countedCash=money(req.body.countedCash); shift.closedAt=now(); shift.closedBy={id:req.user.id,name:req.user.name}; shift.totals=totals; shift.cashDifference=shift.countedCash-totals.expectedCash; audit(req.db,req.user,'cash.close',{shiftId:shift.id,cashDifference:shift.cashDifference}); await writeDb(req.db); res.json(shift);
+  const totals=shiftTotals(req.db,shift); shift.countedCash=money(req.body.countedCash); shift.closedAt=now(); shift.closedBy={id:req.user.id,name:req.user.name}; shift.totals=totals; shift.salesSnapshot=buildSalesSnapshot(req.db,shift.id); shift.cashDifference=shift.countedCash-totals.expectedCash; audit(req.db,req.user,'cash.close',{shiftId:shift.id,cashDifference:shift.cashDifference}); await writeDb(req.db); res.json(shift);
 });
 app.post('/api/admin/expenses', auth, role('admin','employee'), async (req,res)=>{
   const shift=req.db.cashShifts.find(s=>!s.closedAt); if(!shift)return res.status(400).json({error:'Abrí la caja antes de registrar gastos.'});
