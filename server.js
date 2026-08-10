@@ -468,9 +468,11 @@ app.post('/api/admin/upload-image', auth, role('admin','employee'), (req, res) =
 });
 
 app.get('/api/admin/dashboard', auth, role('admin','employee'), (req, res) => {
-  const orders = req.db.orders;
-  const paid = orders.filter(o => o.paymentStatus === 'approved' || o.paymentMethod === 'cash');
-  res.json({ totals: { orders: orders.length, sales: paid.reduce((a,o)=>a+o.total,0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: orders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null, shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30), expenses: req.db.expenses.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100) });
+  const allOrders = Array.isArray(req.db.orders) ? req.db.orders : [];
+  const orders = allOrders.filter(o => !o.archivedAt);
+  const validOrders = orders.filter(o => o.status !== 'cancelled');
+  const paid = validOrders.filter(o => o.paymentStatus === 'approved' || o.paymentMethod === 'cash');
+  res.json({ totals: { orders: validOrders.length, sales: paid.reduce((a,o)=>a+Number(o.total||0),0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: validOrders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null, shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30), expenses: req.db.expenses.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100) });
 });
 app.put('/api/admin/orders/:id', auth, role('admin','employee','courier'), async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id); if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
@@ -569,6 +571,16 @@ app.post('/api/admin/orders/:id/cancel', auth, role('admin','employee'), async (
   io.to(`order:${order.id}`).emit('order:status',{orderId:order.id,status:order.status,refund:order.refund,updatedAt:order.updatedAt}); res.json(order);
 });
 
+
+// FROSTLAND_V61_CANCEL_ARCHIVE_PRINT
+app.post('/api/admin/orders/:id/archive', auth, role('admin','employee'), async (req,res)=>{
+  const order=(req.db.orders||[]).find(o=>o.id===req.params.id); if(!order)return res.status(404).json({error:'Pedido no encontrado.'});
+  if(order.status!=='cancelled')return res.status(400).json({error:'Solo se pueden archivar pedidos cancelados.'});
+  order.archivedAt=now(); order.archivedBy={id:req.user.id,name:req.user.name}; order.updatedAt=now();
+  audit(req.db,req.user,'order.archive',{orderId:order.id,code:order.code}); await writeDb(req.db);
+  res.json({ok:true,orderId:order.id});
+});
+
 // FROSTLAND_V6_SALES_NAV
 function frostlandSalesRange(db, shiftId) {
   if (shiftId) {
@@ -584,7 +596,7 @@ function frostlandSalesRange(db, shiftId) {
 }
 function buildSalesSnapshot(db, shiftId) {
   const range = frostlandSalesRange(db, shiftId); if (!range) return null;
-  const orders = (db.orders || []).filter(o => { const t=new Date(o.createdAt).getTime(); return t>=range.start && t<=range.end && o.status!=='cancelled'; }).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const orders = (db.orders || []).filter(o => { const t=new Date(o.createdAt).getTime(); return t>=range.start && t<=range.end && o.status!=='cancelled' && !o.archivedAt; }).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
   const paidStatuses = new Set(['approved']);
   const customersMap = new Map();
   for (const o of orders) {
