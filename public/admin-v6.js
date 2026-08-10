@@ -32,11 +32,45 @@ async function fillShiftOptions(){try{const d=await api('/api/admin/dashboard');
 async function loadSales(){
  const stats=$('#salesStats'),customers=$('#salesCustomers'),orders=$('#salesOrders');if(!stats||!customers||!orders||!token())return;
  try{const val=$('#salesPeriod')?.value||'current';const q=val==='current'?'':`?shiftId=${encodeURIComponent(val)}`;const d=await api('/api/admin/sales-summary'+q);
- stats.innerHTML=[['Pedidos',d.ordersCount],['Clientes',d.customersCount],['Vendido',money(d.totalSales)],['Cobrado',money(d.paidTotal)],['Pendiente',money(d.pendingTotal)],['Gastos',money(d.totalExpenses||0)]].map(([a,b])=>`<div class="stat"><span>${a}</span><strong>${b}</strong></div>`).join('');
+ stats.innerHTML=[['Pedidos',d.ordersCount],['Clientes',d.customersCount],['Vendido',money(d.totalSales)],['Cobrado',money(d.paidTotal)],['Pendiente',money(d.pendingTotal)],['Gastos',money(d.totalExpenses||0)],['DINERO REAL',money(Number(d.totalSales||0)-Number(d.totalExpenses||0))]].map(([a,b])=>`<div class="stat"><span>${a}</span><strong>${b}</strong></div>`).join('');
  customers.innerHTML=(d.customers||[]).map(c=>`<article class="sales-row"><div><b>${esc(c.name||'Cliente')}</b><small>${esc(c.phone||'sin teléfono')} · ${esc(c.email||'sin email')}</small></div><div><strong>${money(c.total)}</strong><small>${c.ordersCount} pedido${c.ordersCount===1?'':'s'}</small></div></article>`).join('')||'<p>Sin clientes en este período.</p>';
  orders.innerHTML=(d.orders||[]).map(o=>`<article class="sales-row"><div><b>${esc(o.code)}</b><small>${esc(o.customer?.name||'Cliente')} · ${new Date(o.createdAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</small></div><div><strong>${money(o.total)}</strong><small>${esc(statusText(o))}</small></div></article>`).join('')||'<p>Sin pedidos en este período.</p>';
  }catch(e){stats.innerHTML=`<p class="admin-error">No se pudieron cargar las ventas: ${esc(e.message)}</p>`}
 }
-async function refreshAll(){prepareSections();ensureMenu();ensureSalesPanel();await fillShiftOptions();await loadSales()}
+
+/* FROSTLAND_V62B_GASTOS_REAL */
+async function refreshTopMoneyCards(){
+  if(!token() || !$('#stats')) return;
+  try{
+    const d = await api('/api/admin/dashboard');
+    const totals = d.totals || {};
+    const stats = $('#stats');
+    if(!stats) return;
+
+    let gasto = stats.querySelector('[data-v62-card="expenses"]');
+    let real = stats.querySelector('[data-v62-card="realMoney"]');
+
+    if(!gasto){
+      gasto = document.createElement('div');
+      gasto.className = 'stat';
+      gasto.dataset.v62Card = 'expenses';
+      stats.appendChild(gasto);
+    }
+    if(!real){
+      real = document.createElement('div');
+      real.className = 'stat real-money';
+      real.dataset.v62Card = 'realMoney';
+      stats.appendChild(real);
+    }
+
+    gasto.innerHTML = `<span>Gastos</span><strong>${money(totals.expenses||0)}</strong>`;
+    real.innerHTML = `<span>DINERO REAL</span><strong>${money(totals.realMoney||0)}</strong>`;
+  }catch(e){
+    console.warn('V6.2 tarjetas dinero:', e);
+  }
+}
+window.addEventListener('frostland:refresh-sales',()=>{refreshTopMoneyCards();loadSales();});
+
+async function refreshAll(){prepareSections();ensureMenu();ensureSalesPanel();await fillShiftOptions();await loadSales();await refreshTopMoneyCards()}
 document.addEventListener('DOMContentLoaded',()=>{refreshAll();new MutationObserver(()=>{if($('#admin')?.classList.contains('active'))refreshAll()}).observe(document.body,{subtree:true,attributes:true,attributeFilter:['class']});$('#refreshAdmin')?.addEventListener('click',()=>setTimeout(refreshAll,400));});
 })();
