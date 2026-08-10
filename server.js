@@ -470,9 +470,27 @@ app.post('/api/admin/upload-image', auth, role('admin','employee'), (req, res) =
 app.get('/api/admin/dashboard', auth, role('admin','employee'), (req, res) => {
   const allOrders = Array.isArray(req.db.orders) ? req.db.orders : [];
   const orders = allOrders.filter(o => !o.archivedAt);
-  const validOrders = orders.filter(o => o.status !== 'cancelled');
-  const paid = validOrders.filter(o => o.paymentStatus === 'approved' || o.paymentMethod === 'cash');
-  res.json({ totals: { orders: validOrders.length, sales: paid.reduce((a,o)=>a+Number(o.total||0),0), customers: req.db.users.filter(u=>u.role==='customer').length, pending: validOrders.filter(o=>!['delivered','cancelled'].includes(o.status)).length }, orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)), users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings, activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null, shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30), expenses: req.db.expenses.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100) });
+  const arDay = value => {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone:'America/Argentina/Buenos_Aires', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(value));
+    } catch { return ''; }
+  };
+  const today = arDay(new Date());
+  const todayOrders = orders.filter(o => o.status !== 'cancelled' && arDay(o.createdAt) === today);
+  const todayExpenses = (Array.isArray(req.db.expenses) ? req.db.expenses : []).filter(e => arDay(e.createdAt) === today);
+  const totalSales = todayOrders.reduce((a,o)=>a+Number(o.total||0),0);
+  const totalExpenses = todayExpenses.reduce((a,e)=>a+Number(e.amount||0),0);
+  const realMoney = totalSales - totalExpenses;
+  const customersToday = new Set(todayOrders.map(o=>o.userId || o.customer?.email || o.customer?.phone || o.customer?.name).filter(Boolean)).size;
+  const pendingToday = todayOrders.filter(o=>!['delivered','cancelled'].includes(o.status)).length;
+  res.json({
+    totals: { orders: todayOrders.length, sales: totalSales, customers: customersToday, pending: pendingToday, expenses: totalExpenses, realMoney, date: today },
+    orders: orders.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),
+    users: req.db.users.map(publicUser), products: req.db.products, flavors: req.db.flavors, settings: req.db.settings,
+    activeShift: req.db.cashShifts.find(s=>!s.closedAt)||null,
+    shifts: req.db.cashShifts.slice().sort((a,b)=>b.openedAt.localeCompare(a.openedAt)).slice(0,30),
+    expenses: req.db.expenses.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100)
+  });
 });
 app.put('/api/admin/orders/:id', auth, role('admin','employee','courier'), async (req, res) => {
   const order = req.db.orders.find(o => o.id === req.params.id); if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
