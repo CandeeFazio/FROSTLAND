@@ -16,20 +16,51 @@ function markExistingSections(){
  map.forEach(([titles,id])=>{const p=findPanel(titles);if(p)p.id=id});
 }
 function ensureLayout(){
- const admin=$('#admin');if(!admin||$('#v7Sidebar'))return;
+ const admin=$('#admin');if(!admin)return;
  markExistingSections();
  admin.classList.add('v7-admin');
- const sidebar=document.createElement('aside');sidebar.id='v7Sidebar';sidebar.className='v7-sidebar';
- sidebar.innerHTML=`<div class="v7-side-head"><div class="v7-logo">F</div><div><b>FROSTLAND</b><small>Panel de gestión</small></div></div><nav>
- <button data-v7-target="v7-dashboard">⌂ <span>Inicio</span></button><button data-v7-target="v7-orders">▣ <span>Pedidos</span></button><button data-v7-target="admin-ventas">↗ <span>Ventas</span></button><button data-v7-target="v7-cash">▤ <span>Caja</span></button><button data-v7-target="v7-customers">◎ <span>Clientes</span></button><button data-v7-target="v7-suppliers">▦ <span>Proveedores</span></button><button data-v7-target="v7-stock">◫ <span>Stock y sabores</span></button><button data-v7-target="v7-products">$ <span>Productos y precios</span></button><button data-v7-target="v7-banners">▧ <span>Banners</span></button><button data-v7-target="v7-content">✎ <span>Contenido</span></button><button data-v7-target="v7-settings">⚙ <span>Horarios y config.</span></button></nav>`;
- const content=document.createElement('div');content.className='v7-admin-content';content.id='v7AdminContent';
- [...admin.children].forEach(x=>{if(x!==sidebar)content.appendChild(x)});
- admin.append(sidebar,content);
- const stats=$('#stats');if(stats)stats.id='v7-dashboard';
- $$('#v7Sidebar [data-v7-target]').forEach(b=>b.onclick=()=>{document.getElementById(b.dataset.v7Target)?.scrollIntoView({behavior:'smooth',block:'start'});$$('#v7Sidebar button').forEach(x=>x.classList.toggle('active',x===b))});
- $('#adminQuickMenu')?.classList.add('v7-hide-quick');
- ensureCustomerPanel();ensureSupplierPanel();
+
+ const oldContent=$('#v7AdminContent');
+ if(oldContent){
+   [...oldContent.children].forEach(x=>admin.insertBefore(x,oldContent));
+   oldContent.remove();
+ }
+
+ let sidebar=$('#v7Sidebar');
+ if(!sidebar){
+   sidebar=document.createElement('aside');
+   sidebar.id='v7Sidebar';
+   sidebar.className='v7-sidebar';
+   sidebar.innerHTML=`<div class="v7-side-head"><div class="v7-logo">F</div><div><b>FROSTLAND</b><small>Panel de gestión</small></div></div><nav>
+   <button data-v7-target="v7-dashboard"><span>Inicio</span></button>
+   <button data-v7-target="v7-orders"><span>Pedidos</span></button>
+   <button data-v7-target="admin-ventas"><span>Ventas</span></button>
+   <button data-v7-target="v7-cash"><span>Caja</span></button>
+   <button data-v7-target="v7-customers"><span>Clientes</span></button>
+   <button data-v7-target="v7-suppliers"><span>Proveedores</span></button>
+   <button data-v7-target="v7-stock"><span>Stock y sabores</span></button>
+   <button data-v7-target="v7-products"><span>Productos y precios</span></button>
+   <button data-v7-target="v7-banners"><span>Banners</span></button>
+   <button data-v7-target="v7-content"><span>Contenido</span></button>
+   <button data-v7-target="v7-settings"><span>Horarios y config.</span></button>
+   </nav>`;
+   admin.insertBefore(sidebar,admin.firstChild);
+ }
+
+ const stats=$('#stats')||$('#v7-dashboard');
+ if(stats)stats.id='v7-dashboard';
+
+ $$('#v7Sidebar [data-v7-target]').forEach(b=>b.onclick=()=>{
+   const target=document.getElementById(b.dataset.v7Target);
+   if(target)target.scrollIntoView({behavior:'smooth',block:'start'});
+   $$('#v7Sidebar button').forEach(x=>x.classList.toggle('active',x===b));
+ });
+
+ $('#adminQuickMenu')?.classList.remove('v7-hide-quick');
+ ensureCustomerPanel();
+ ensureSupplierPanel();
 }
+
 function ensureCustomerPanel(){
  if($('#v7-customers'))return;
  const anchor=$('#admin-ventas')||$('#v7-dashboard');if(!anchor)return;
