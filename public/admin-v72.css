@@ -1,0 +1,48 @@
+/* FROSTLAND V7.2 ESTABLE - no mueve ni envuelve módulos originales */
+#v72Sidebar{display:none}
+body.v72-admin-mode #v72Sidebar{display:block}
+body.v72-admin-mode #admin{
+  max-width:1500px!important;
+  margin:0 auto!important;
+  padding-left:255px!important;
+  color:#1d1815!important;
+}
+body.v72-admin-mode #admin,
+body.v72-admin-mode #admin .panel,
+body.v72-admin-mode #admin input,
+body.v72-admin-mode #admin textarea,
+body.v72-admin-mode #admin select{color:#1d1815!important}
+body.v72-admin-mode #admin input,
+body.v72-admin-mode #admin textarea,
+body.v72-admin-mode #admin select{background:#fff!important}
+body.v72-admin-mode .topbar{display:none!important}
+.v72-sidebar{
+ position:fixed;left:16px;top:16px;width:215px;max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;
+ background:#1b1714;color:#fff;border-radius:20px;padding:15px;z-index:100;box-shadow:0 20px 60px rgba(0,0,0,.18)
+}
+.v72-brand{display:flex;gap:10px;align-items:center;padding:5px 5px 16px;border-bottom:1px solid rgba(255,255,255,.12);margin-bottom:10px}
+.v72-mark{width:38px;height:38px;border-radius:11px;background:#fff;color:#1b1714;display:grid;place-items:center;font-weight:900;font-size:20px}
+.v72-brand b,.v72-brand small{display:block}.v72-brand small{opacity:.6;font-size:11px}
+.v72-sidebar nav{display:grid;gap:4px}
+.v72-sidebar nav button{border:0;background:transparent;color:#eee;text-align:left;padding:10px 11px;border-radius:10px;cursor:pointer;font-size:13px}
+.v72-sidebar nav button:hover,.v72-sidebar nav button.active{background:#fff;color:#1b1714}
+.v72-panel{scroll-margin-top:15px}
+.v72-head{display:flex;gap:15px;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.v72-head h2{margin:0 0 3px}.v72-head p{margin:0}.v72-head input,.v72-search{border:1px solid #ddd4cb;border-radius:11px;padding:10px 11px;background:#fff;color:#1b1714}
+.v72-kicker{font-size:10px!important;font-weight:900;letter-spacing:.12em;opacity:.55}
+.v72-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}.v72-tabs button{border:1px solid #ded6ce;background:#fff;color:#1b1714;padding:7px 10px;border-radius:999px}.v72-tabs button.active{background:#1b1714;color:#fff}
+.v72-split{display:grid;grid-template-columns:minmax(280px,.85fr) minmax(0,1.4fr);gap:14px}
+.v72-list{display:grid;gap:7px;max-height:620px;overflow:auto}.v72-card{display:grid;gap:7px;width:100%;text-align:left;border:1px solid #e3dbd3;background:#fff;color:#1b1714;border-radius:13px;padding:12px;cursor:pointer}.v72-card b,.v72-card small{display:block}.v72-card small{opacity:.65}.v72-card-foot{display:flex;justify-content:space-between;gap:8px;font-size:12px}.v72-chips{display:flex;gap:5px;flex-wrap:wrap}.v72-chips i{font-style:normal;background:#edf5ee;color:#34583a;padding:3px 6px;border-radius:999px;font-size:10px}.v72-chips i.warn{background:#fff1de;color:#8a581a}
+.v72-detail{border:1px solid #e4ddd5;background:#fcfbfa;color:#1b1714;border-radius:15px;padding:15px;min-height:220px}.v72-detail-head{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #ebe4dd;padding-bottom:12px}.v72-detail-head h3{margin:0 0 3px}.v72-detail-head p{margin:0;opacity:.7}.v72-detail-head>strong{font-size:20px}
+.v72-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:12px 0}.v72-metrics span{background:#f0ede9;border-radius:10px;padding:8px;font-size:11px}.v72-metrics b{display:block;font-size:13px}
+.v72-row{display:flex;justify-content:space-between;gap:10px;padding:9px 1px;border-bottom:1px solid #eee7e0}.v72-row b,.v72-row small{display:block}.v72-row small{opacity:.65}.v72-row>div:last-child{text-align:right}
+.v72-empty,.v72-note{padding:24px;text-align:center;opacity:.62}.v72-note{background:#fff7e9;border-radius:11px}
+.v72-actions-left{display:flex;gap:8px;margin:12px 0}.v72-dialog{border:0;border-radius:16px;padding:0;max-width:500px;width:calc(100% - 30px);color:#1b1714}.v72-dialog::backdrop{background:rgba(0,0,0,.35)}.v72-dialog form{display:grid;gap:9px;padding:18px}.v72-dialog input,.v72-dialog textarea,.v72-dialog select{width:100%;box-sizing:border-box;border:1px solid #ddd4cb;border-radius:10px;padding:9px 10px;background:#fff;color:#1b1714}.v72-dialog textarea{min-height:72px}.v72-actions{display:flex;justify-content:flex-end;gap:8px}
+#v72-dashboard,#v72-orders,#v72-sales,#v72-cash,#v72-clients,#v72-suppliers,#v72-stock,#v72-products,#v72-banners,#v72-content,#v72-settings{scroll-margin-top:15px}
+@media(max-width:900px){
+ body.v72-admin-mode #admin{padding-left:10px!important}
+ body.v72-admin-mode .topbar{display:none!important}
+ .v72-sidebar{position:sticky;left:auto;top:0;width:auto;max-height:none;border-radius:0 0 16px 16px;margin:0 0 12px;overflow-x:auto;overflow-y:hidden}
+ .v72-sidebar .v72-brand{display:none}.v72-sidebar nav{display:flex;min-width:max-content}.v72-sidebar nav button{white-space:nowrap}
+ .v72-split{grid-template-columns:1fr}.v72-metrics{grid-template-columns:1fr 1fr}.v72-list{max-height:360px}
+}
