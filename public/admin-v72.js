@@ -169,6 +169,15 @@ async function renderSupplierDetail(id){
       await loadSuppliers();
     }catch(err){alert(err.message)}
   };
+  $('#v72DeleteSupplier').onclick=async()=>{
+    if(!confirm(`¿Eliminar al proveedor "${s.name}"?\n\nSolo se eliminará si no tiene remitos ni pagos.`))return;
+    try{
+      await api(`/api/admin/suppliers/${id}`,{method:'DELETE'});
+      selectedSupplier=null;
+      $('#v72SupplierDetail').innerHTML='<div class="v72-empty">Proveedor eliminado.</div>';
+      await loadSuppliers();
+    }catch(err){alert(err.message)}
+  };
   $$('#v72SupplierDetail [data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());
   $('#v72ReceiptForm').onsubmit=async e=>{e.preventDefault();try{await api(`/api/admin/suppliers/${id}/receipts`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget))) });await loadSuppliers()}catch(x){alert(x.message)}};
   $('#v72PaymentForm').onsubmit=async e=>{e.preventDefault();try{await api(`/api/admin/suppliers/${id}/payments`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget))) });await loadSuppliers()}catch(x){alert(x.message)}};
