@@ -688,6 +688,60 @@ app.post('/api/admin/inventory/flavor/:id/adjust', auth, role('admin','employee'
 
 app.post('/api/admin/users', auth, role('admin'), async (req,res)=>{ if(!['admin','employee','courier'].includes(req.body.role))return res.status(400).json({error:'Rol inválido'}); const u={id:uid(),name:req.body.name,email:req.body.email.toLowerCase(),phone:req.body.phone||'',passwordHash:await bcrypt.hash(req.body.password||'frostland123',10),role:req.body.role,points:0,createdAt:now()}; req.db.users.push(u); await writeDb(req.db); res.status(201).json(publicUser(u)); });
 
+
+// FROSTLAND_V7_PROVEEDORES
+function ensureSupplierCollections(db){
+  if(!Array.isArray(db.suppliers)) db.suppliers=[];
+  if(!Array.isArray(db.supplierReceipts)) db.supplierReceipts=[];
+  if(!Array.isArray(db.supplierPayments)) db.supplierPayments=[];
+}
+function supplierSummary(db,s){
+  ensureSupplierCollections(db);
+  const receipts=db.supplierReceipts.filter(r=>r.supplierId===s.id);
+  const payments=db.supplierPayments.filter(p=>p.supplierId===s.id);
+  const purchased=receipts.reduce((a,r)=>a+Number(r.total||0),0);
+  const paid=payments.reduce((a,p)=>a+Number(p.amount||0),0);
+  return {...s,purchased,paid,balance:purchased-paid,receiptsCount:receipts.length,paymentsCount:payments.length};
+}
+app.get('/api/admin/suppliers', auth, role('admin','employee'), (req,res)=>{
+  ensureSupplierCollections(req.db);
+  res.json(req.db.suppliers.map(s=>supplierSummary(req.db,s)).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'es')));
+});
+app.post('/api/admin/suppliers', auth, role('admin','employee'), async (req,res)=>{
+  ensureSupplierCollections(req.db);
+  const name=String(req.body.name||'').trim(); if(!name)return res.status(400).json({error:'Ingresá el nombre del proveedor.'});
+  const supplier={id:uid(),name,contact:String(req.body.contact||'').trim(),phone:String(req.body.phone||'').trim(),email:String(req.body.email||'').trim(),cuit:String(req.body.cuit||'').trim(),notes:String(req.body.notes||'').trim(),createdAt:now(),updatedAt:now()};
+  req.db.suppliers.push(supplier); await writeDb(req.db); res.status(201).json(supplierSummary(req.db,supplier));
+});
+app.put('/api/admin/suppliers/:id', auth, role('admin','employee'), async (req,res)=>{
+  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
+  for(const k of ['name','contact','phone','email','cuit','notes']) if(req.body[k]!==undefined)s[k]=String(req.body[k]||'').trim();
+  s.updatedAt=now(); await writeDb(req.db); res.json(supplierSummary(req.db,s));
+});
+app.get('/api/admin/suppliers/:id', auth, role('admin','employee'), (req,res)=>{
+  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
+  const receipts=req.db.supplierReceipts.filter(r=>r.supplierId===s.id).sort((a,b)=>String(b.date||b.createdAt).localeCompare(String(a.date||a.createdAt)));
+  const payments=req.db.supplierPayments.filter(p=>p.supplierId===s.id).sort((a,b)=>String(b.date||b.createdAt).localeCompare(String(a.date||a.createdAt)));
+  const receiptRows=receipts.map(r=>{const paid=payments.filter(p=>p.receiptId===r.id).reduce((a,p)=>a+Number(p.amount||0),0);return {...r,paid,balance:Number(r.total||0)-paid,status:paid<=0?'pending':paid>=Number(r.total||0)?'paid':'partial'}});
+  res.json({...supplierSummary(req.db,s),receipts:receiptRows,payments});
+});
+app.post('/api/admin/suppliers/:id/receipts', auth, role('admin','employee'), async (req,res)=>{
+  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
+  const total=Math.max(0,Number(req.body.total)||0); if(!total)return res.status(400).json({error:'Ingresá el total del remito.'});
+  const r={id:uid(),supplierId:s.id,number:String(req.body.number||'').trim(),date:String(req.body.date||'').trim()||now(),total,description:String(req.body.description||'').trim(),notes:String(req.body.notes||'').trim(),createdBy:{id:req.user.id,name:req.user.name},createdAt:now()};
+  req.db.supplierReceipts.push(r); await writeDb(req.db); res.status(201).json(r);
+});
+app.post('/api/admin/suppliers/:id/payments', auth, role('admin','employee'), async (req,res)=>{
+  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
+  const amount=Math.max(0,Number(req.body.amount)||0); if(!amount)return res.status(400).json({error:'Ingresá el monto entregado.'});
+  const methods=['cash','transfer','mercadopago','qr','cheque','other']; const method=methods.includes(req.body.method)?req.body.method:'other';
+  const receiptId=String(req.body.receiptId||'').trim()||null;
+  if(receiptId&&!req.db.supplierReceipts.some(r=>r.id===receiptId&&r.supplierId===s.id))return res.status(400).json({error:'El remito seleccionado no pertenece al proveedor.'});
+  const p={id:uid(),supplierId:s.id,receiptId,amount,method,reference:String(req.body.reference||'').trim(),date:String(req.body.date||'').trim()||now(),notes:String(req.body.notes||'').trim(),createdBy:{id:req.user.id,name:req.user.name},createdAt:now()};
+  req.db.supplierPayments.push(p); await writeDb(req.db); res.status(201).json(p);
+});
+
+
 app.get('/{*splat}', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 await initFirebase();
