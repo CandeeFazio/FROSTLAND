@@ -742,6 +742,78 @@ app.post('/api/admin/suppliers/:id/payments', auth, role('admin','employee'), as
 });
 
 
+
+// FROSTLAND_V73_DELETE_SUPPLIERS
+app.delete('/api/admin/suppliers/:id', auth, role('admin'), async (req,res)=>{
+  ensureSupplierCollections(req.db);
+  const s=req.db.suppliers.find(x=>x.id===req.params.id);
+  if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
+
+  const receipts=req.db.supplierReceipts.filter(r=>r.supplierId===s.id);
+  const payments=req.db.supplierPayments.filter(p=>p.supplierId===s.id);
+
+  if(receipts.length || payments.length){
+    return res.status(409).json({
+      error:`No se puede eliminar ${s.name} porque tiene ${receipts.length} remito(s) y ${payments.length} pago(s).`,
+      receipts:receipts.length,
+      payments:payments.length
+    });
+  }
+
+  req.db.suppliers=req.db.suppliers.filter(x=>x.id!==s.id);
+  await writeDb(req.db);
+  res.json({ok:true,deletedId:s.id,name:s.name});
+});
+
+app.post('/api/admin/suppliers-clean-duplicates', auth, role('admin'), async (req,res)=>{
+  ensureSupplierCollections(req.db);
+
+  const norm=v=>String(v||'').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ');
+
+  const groups=new Map();
+  for(const s of req.db.suppliers){
+    const key=norm(s.name);
+    if(!key)continue;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(s);
+  }
+
+  const removed=[];
+  const kept=[];
+
+  for(const [key,list] of groups){
+    if(list.length<2)continue;
+
+    list.sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||'')));
+
+    const withMovements=list.filter(s=>
+      req.db.supplierReceipts.some(r=>r.supplierId===s.id) ||
+      req.db.supplierPayments.some(p=>p.supplierId===s.id)
+    );
+
+    const keep=withMovements[0] || list[0];
+    kept.push({id:keep.id,name:keep.name});
+
+    for(const s of list){
+      if(s.id===keep.id)continue;
+      const hasMovements=
+        req.db.supplierReceipts.some(r=>r.supplierId===s.id) ||
+        req.db.supplierPayments.some(p=>p.supplierId===s.id);
+
+      if(!hasMovements){
+        req.db.suppliers=req.db.suppliers.filter(x=>x.id!==s.id);
+        removed.push({id:s.id,name:s.name});
+      }
+    }
+  }
+
+  await writeDb(req.db);
+  res.json({ok:true,removed,kept});
+});
+
+
 app.get('/{*splat}', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 await initFirebase();

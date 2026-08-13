@@ -67,11 +67,12 @@ function ensureNewPanels(){
  }
  if(!$('#v72-suppliers')){
    const sec=document.createElement('section'); sec.className='panel v72-panel'; sec.id='v72-suppliers';
-   sec.innerHTML=`<div class="v72-head"><div><p class="v72-kicker">PROVEEDORES</p><h2>Proveedores</h2><p>Remitos, pagos entregados y saldo pendiente.</p></div><button id="v72NewSupplier">+ Nuevo proveedor</button></div>
+   sec.innerHTML=`<div class="v72-head"><div><p class="v72-kicker">PROVEEDORES</p><h2>Proveedores</h2><p>Remitos, pagos entregados y saldo pendiente.</p></div><div class="v72-actions-left"><button id="v72CleanDuplicates" class="secondary">Limpiar duplicados</button><button id="v72NewSupplier">+ Nuevo proveedor</button></div></div>
    <div class="v72-split"><div><input id="v72SupplierSearch" class="v72-search" placeholder="Buscar proveedor"><div id="v72SupplierList" class="v72-list"></div></div><div id="v72SupplierDetail" class="v72-detail"><div class="v72-empty">Elegí un proveedor.</div></div></div>
    <dialog id="v72SupplierDialog" class="v72-dialog"><form method="dialog" id="v72SupplierForm"><h3>Nuevo proveedor</h3><input name="name" required placeholder="Nombre / razón social"><input name="contact" placeholder="Contacto"><input name="phone" placeholder="Teléfono"><input name="email" placeholder="Email"><input name="cuit" placeholder="CUIT"><textarea name="notes" placeholder="Notas"></textarea><div class="v72-actions"><button type="button" data-close>Cancelar</button><button>Guardar</button></div></form></dialog>`;
    (document.getElementById('v72-clients')||document.getElementById('v72-sales')||admin.firstElementChild)?.insertAdjacentElement('afterend',sec);
    $('#v72NewSupplier').onclick=()=>$('#v72SupplierDialog').showModal();
+   $('#v72CleanDuplicates').onclick=cleanDuplicateSuppliers;
    $('#v72SupplierDialog [data-close]').onclick=()=>$('#v72SupplierDialog').close();
    $('#v72SupplierForm').onsubmit=saveSupplier;
    $('#v72SupplierSearch').oninput=renderSupplierList;
@@ -117,9 +118,36 @@ function renderSupplierList(){
  const el=$('#v72SupplierList');if(!el)return;
  const q=String($('#v72SupplierSearch')?.value||'').toLowerCase();
  const rows=suppliers.filter(s=>`${s.name||''} ${s.contact||''} ${s.phone||''}`.toLowerCase().includes(q));
- el.innerHTML=rows.map(s=>`<button class="v72-card" data-supplier="${s.id}"><div><b>${esc(s.name)}</b><small>${esc(s.contact||s.phone||'Sin contacto')}</small></div><div class="v72-card-foot"><span>Saldo</span><strong>${money(s.balance)}</strong></div></button>`).join('')||'<div class="v72-empty">No hay proveedores cargados.</div>';
+ el.innerHTML=rows.map(s=>`<div class="v73-supplier-line"><button class="v72-card v73-grow" data-supplier="${s.id}"><div><b>${esc(s.name)}</b><small>${esc(s.contact||s.phone||'Sin contacto')}</small></div><div class="v72-card-foot"><span>Saldo</span><strong>${money(s.balance)}</strong></div></button><button class="v73-delete" data-delete-supplier="${s.id}" title="Eliminar proveedor">Eliminar</button></div>`).join('')||'<div class="v72-empty">No hay proveedores cargados.</div>';
  $$('[data-supplier]').forEach(b=>b.onclick=()=>renderSupplierDetail(b.dataset.supplier));
+ $$('[data-delete-supplier]').forEach(b=>b.onclick=async e=>{
+   e.stopPropagation();
+   const id=b.dataset.deleteSupplier;
+   const s=suppliers.find(x=>x.id===id);
+   if(!s)return;
+   if(!confirm(`¿Eliminar al proveedor "${s.name}"?\n\nSolo se eliminará si NO tiene remitos ni pagos cargados.`))return;
+   try{
+     await api(`/api/admin/suppliers/${id}`,{method:'DELETE'});
+     if(selectedSupplier===id){
+       selectedSupplier=null;
+       const d=$('#v72SupplierDetail');
+       if(d)d.innerHTML='<div class="v72-empty">Elegí un proveedor.</div>';
+     }
+     await loadSuppliers();
+   }catch(err){alert(err.message)}
+ });
 }
+async function cleanDuplicateSuppliers(){
+ if(!confirm('Esto eliminará automáticamente proveedores repetidos con el MISMO NOMBRE, únicamente cuando el duplicado no tenga remitos ni pagos.\n\nEl proveedor con movimientos siempre se conserva.\n\n¿Continuar?'))return;
+ try{
+   const r=await api('/api/admin/suppliers-clean-duplicates',{method:'POST',body:'{}'});
+   const n=(r.removed||[]).length;
+   alert(n?`Listo. Se eliminaron ${n} proveedor(es) duplicado(s) sin movimientos.`:'No encontré duplicados seguros para eliminar.');
+   selectedSupplier=null;
+   await loadSuppliers();
+ }catch(err){alert(err.message)}
+}
+
 async function saveSupplier(e){
  e.preventDefault(); const body=Object.fromEntries(new FormData(e.currentTarget));
  try{const s=await api('/api/admin/suppliers',{method:'POST',body:JSON.stringify(body)});$('#v72SupplierDialog').close();e.currentTarget.reset();selectedSupplier=s.id;await loadSuppliers()}
@@ -129,9 +157,18 @@ async function renderSupplierDetail(id){
  selectedSupplier=id; const el=$('#v72SupplierDetail');if(!el)return;
  try{
   const s=await api(`/api/admin/suppliers/${id}`);
-  el.innerHTML=`<div class="v72-detail-head"><div><p class="v72-kicker">PROVEEDOR</p><h3>${esc(s.name)}</h3><p>${esc(s.phone||'')} ${s.cuit?'· CUIT '+esc(s.cuit):''}</p></div><strong>${money(s.balance)}</strong></div><div class="v72-metrics"><span><b>${money(s.purchased)}</b> comprado</span><span><b>${money(s.paid)}</b> pagado</span><span><b>${money(s.balance)}</b> pendiente</span></div><div class="v72-actions-left"><button id="v72AddReceipt">+ Remito</button><button id="v72AddPayment">+ Pago</button></div><h4>Remitos</h4>${(s.receipts||[]).map(r=>`<div class="v72-row"><div><b>Remito ${esc(r.number||'s/n')}</b><small>${new Date(r.date).toLocaleDateString('es-AR')}</small></div><div><strong>${money(r.total)}</strong><small>Saldo ${money(r.balance)}</small></div></div>`).join('')||'<div class="v72-empty">Sin remitos.</div>'}<h4>Pagos</h4>${(s.payments||[]).map(p=>`<div class="v72-row"><div><b>${esc(p.method||'Pago')}</b><small>${new Date(p.date).toLocaleDateString('es-AR')}</small></div><div><strong>${money(p.amount)}</strong></div></div>`).join('')||'<div class="v72-empty">Sin pagos.</div>'}<dialog id="v72ReceiptDialog" class="v72-dialog"><form method="dialog" id="v72ReceiptForm"><h3>Cargar remito</h3><input name="number" placeholder="N° remito"><input name="date" type="date"><input name="total" type="number" step="0.01" required placeholder="Total"><input name="description" placeholder="Detalle"><textarea name="notes" placeholder="Notas"></textarea><div class="v72-actions"><button type="button" data-close>Cancelar</button><button>Guardar</button></div></form></dialog><dialog id="v72PaymentDialog" class="v72-dialog"><form method="dialog" id="v72PaymentForm"><h3>Registrar pago</h3><input name="amount" type="number" step="0.01" required placeholder="Monto"><select name="method"><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="mercadopago">Mercado Pago</option><option value="qr">QR</option><option value="cheque">Cheque</option><option value="other">Otro</option></select><input name="date" type="date"><select name="receiptId"><option value="">A cuenta general</option>${(s.receipts||[]).filter(r=>r.balance>0).map(r=>`<option value="${r.id}">Remito ${esc(r.number||'s/n')} · saldo ${money(r.balance)}</option>`).join('')}</select><input name="reference" placeholder="Referencia"><textarea name="notes" placeholder="Notas"></textarea><div class="v72-actions"><button type="button" data-close>Cancelar</button><button>Guardar</button></div></form></dialog>`;
+  el.innerHTML=`<div class="v72-detail-head"><div><p class="v72-kicker">PROVEEDOR</p><h3>${esc(s.name)}</h3><p>${esc(s.phone||'')} ${s.cuit?'· CUIT '+esc(s.cuit):''}</p></div><strong>${money(s.balance)}</strong></div><div class="v72-metrics"><span><b>${money(s.purchased)}</b> comprado</span><span><b>${money(s.paid)}</b> pagado</span><span><b>${money(s.balance)}</b> pendiente</span></div><div class="v72-actions-left"><button id="v72AddReceipt">+ Remito</button><button id="v72AddPayment">+ Pago</button><button id="v72DeleteSupplier" class="v73-danger">Eliminar proveedor</button></div><h4>Remitos</h4>${(s.receipts||[]).map(r=>`<div class="v72-row"><div><b>Remito ${esc(r.number||'s/n')}</b><small>${new Date(r.date).toLocaleDateString('es-AR')}</small></div><div><strong>${money(r.total)}</strong><small>Saldo ${money(r.balance)}</small></div></div>`).join('')||'<div class="v72-empty">Sin remitos.</div>'}<h4>Pagos</h4>${(s.payments||[]).map(p=>`<div class="v72-row"><div><b>${esc(p.method||'Pago')}</b><small>${new Date(p.date).toLocaleDateString('es-AR')}</small></div><div><strong>${money(p.amount)}</strong></div></div>`).join('')||'<div class="v72-empty">Sin pagos.</div>'}<dialog id="v72ReceiptDialog" class="v72-dialog"><form method="dialog" id="v72ReceiptForm"><h3>Cargar remito</h3><input name="number" placeholder="N° remito"><input name="date" type="date"><input name="total" type="number" step="0.01" required placeholder="Total"><input name="description" placeholder="Detalle"><textarea name="notes" placeholder="Notas"></textarea><div class="v72-actions"><button type="button" data-close>Cancelar</button><button>Guardar</button></div></form></dialog><dialog id="v72PaymentDialog" class="v72-dialog"><form method="dialog" id="v72PaymentForm"><h3>Registrar pago</h3><input name="amount" type="number" step="0.01" required placeholder="Monto"><select name="method"><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="mercadopago">Mercado Pago</option><option value="qr">QR</option><option value="cheque">Cheque</option><option value="other">Otro</option></select><input name="date" type="date"><select name="receiptId"><option value="">A cuenta general</option>${(s.receipts||[]).filter(r=>r.balance>0).map(r=>`<option value="${r.id}">Remito ${esc(r.number||'s/n')} · saldo ${money(r.balance)}</option>`).join('')}</select><input name="reference" placeholder="Referencia"><textarea name="notes" placeholder="Notas"></textarea><div class="v72-actions"><button type="button" data-close>Cancelar</button><button>Guardar</button></div></form></dialog>`;
   $('#v72AddReceipt').onclick=()=>$('#v72ReceiptDialog').showModal();
   $('#v72AddPayment').onclick=()=>$('#v72PaymentDialog').showModal();
+  $('#v72DeleteSupplier').onclick=async()=>{
+    if(!confirm(`¿Eliminar al proveedor "${s.name}"?\n\nSolo se eliminará si no tiene remitos ni pagos.`))return;
+    try{
+      await api(`/api/admin/suppliers/${id}`,{method:'DELETE'});
+      selectedSupplier=null;
+      $('#v72SupplierDetail').innerHTML='<div class="v72-empty">Proveedor eliminado.</div>';
+      await loadSuppliers();
+    }catch(err){alert(err.message)}
+  };
   $$('#v72SupplierDetail [data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());
   $('#v72ReceiptForm').onsubmit=async e=>{e.preventDefault();try{await api(`/api/admin/suppliers/${id}/receipts`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget))) });await loadSuppliers()}catch(x){alert(x.message)}};
   $('#v72PaymentForm').onsubmit=async e=>{e.preventDefault();try{await api(`/api/admin/suppliers/${id}/payments`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget))) });await loadSuppliers()}catch(x){alert(x.message)}};

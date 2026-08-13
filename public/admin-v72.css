@@ -46,3 +46,10 @@ body.v72-admin-mode .topbar{display:none!important}
  .v72-sidebar .v72-brand{display:none}.v72-sidebar nav{display:flex;min-width:max-content}.v72-sidebar nav button{white-space:nowrap}
  .v72-split{grid-template-columns:1fr}.v72-metrics{grid-template-columns:1fr 1fr}.v72-list{max-height:360px}
 }
+
+
+/* FROSTLAND V7.3 proveedores */
+.v73-supplier-line{display:flex;gap:7px;align-items:stretch}
+.v73-grow{flex:1;min-width:0}
+.v73-delete,.v73-danger{border:1px solid #d9aaa2!important;background:#fff3f1!important;color:#9a382d!important;border-radius:11px!important;padding:8px 10px!important;cursor:pointer!important}
+.v73-delete:hover,.v73-danger:hover{background:#9a382d!important;color:#fff!important}
