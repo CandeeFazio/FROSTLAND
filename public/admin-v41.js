@@ -12,6 +12,8 @@ function renderAudit(){const el=$('#stockAuditList');if(!el)return;const rows=(d
 async function loadFinance(){const form=$('#financeFilter');const q=new URLSearchParams();if(form?.from.value)q.set('from',form.from.value);if(form?.to.value)q.set('to',form.to.value);const d=await api('/api/admin/finance-summary?'+q.toString());$('#financeSummary').innerHTML=[['Efectivo',money(d.byMethod.cash)],['Mercado Pago',money(d.byMethod.mercadopago)],['QR',money(d.byMethod.qr)],['Transferencia',money(d.byMethod.transfer)],['Gastos',money(d.totalExpenses)],['Neto',money(d.net)]].map(x=>`<div class="stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('');$('#financeExpenses').innerHTML=(d.expenses||[]).slice(0,30).map(e=>`<div class="v41-row"><div><b>${esc(e.category)}</b><small>${esc(e.description||'')} · ${esc(e.createdBy?.name||'')}</small></div><strong>-${money(e.amount)}</strong></div>`).join('')}
 $('#promoAdminForm')?.addEventListener('submit',async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));b.oncePerCustomer=e.target.oncePerCustomer.checked;b.active=e.target.active.checked;await api('/api/admin/promos',{method:'POST',body:JSON.stringify(b)});e.target.reset();e.target.active.checked=true;load()});
 $('#customerSearch')?.addEventListener('input',renderCustomers);$('#financeFilter')?.addEventListener('submit',e=>{e.preventDefault();loadFinance()});
-new MutationObserver(()=>{if($('#admin')?.classList.contains('active'))load()}).observe(document.body,{subtree:true,attributes:true,attributeFilter:['class']});
-$('#refreshAdmin')?.addEventListener('click',()=>setTimeout(load,300));setTimeout(load,1200);
+document.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(b?.dataset.view==='admin')setTimeout(load,250)});
+window.addEventListener('frostland:admin-updated',()=>setTimeout(load,120));
+$('#refreshAdmin')?.addEventListener('click',()=>setTimeout(load,300));
+if($('#admin')?.classList.contains('active'))setTimeout(load,250);
 })();
