@@ -164,11 +164,50 @@ function bindOrderControlButtons(){$$('[data-accept-order]').forEach(b=>b.onclic
 async function acceptOrder(id){try{await api(`/api/admin/orders/${id}/accept`,{method:'POST',body:'{}'});stopOrderAlarm();await loadAdmin();openTicket(id,true);setTimeout(()=>window.print(),250)}catch(e){toast(e.message)}}
 async function cancelOrder(id){const reason=prompt('Motivo de cancelación:','Sin stock disponible');if(reason===null)return;if(!confirm('¿Confirmás la cancelación? Si se pagó con Mercado Pago se solicitará el reintegro.'))return;try{const o=await api(`/api/admin/orders/${id}/cancel`,{method:'POST',body:JSON.stringify({reason})});toast(o.refund?.status==='failed'?`Pedido cancelado; revisar reintegro: ${o.refund.detail}`:'Pedido cancelado');await loadAdmin()}catch(e){toast(e.message)}}
 async function archiveOrder(id){if(!confirm('¿Ocultar este pedido cancelado del panel? El registro NO se borra y queda guardado en la base.'))return;try{await api(`/api/admin/orders/${id}/archive`,{method:'POST',body:'{}'});toast('Pedido cancelado archivado');await loadAdmin()}catch(e){toast(e.message)}}
-function renderV4Admin(d){const shift=d.activeShift;$('#cashShiftStatus').innerHTML=shift?`<b>Caja abierta por ${escapeHtml(shift.employeeName)}</b><small>Desde ${new Date(shift.openedAt).toLocaleString('es-AR')} · Inicial ${ars(shift.openingCash)}</small>`:'<b>Caja cerrada</b><small>Abrí un turno para registrar ventas y gastos.</small>';$('#openShiftForm').hidden=!!shift;$('#closeShiftForm').hidden=!shift;if(shift)$('#activeShiftId').value=shift.id;$('#expenseForm').hidden=!shift;$('#expenseList').innerHTML=(d.expenses||[]).slice(0,20).map(e=>`<div class="expense-row"><div><b>${escapeHtml(e.category)}</b><small>${escapeHtml(e.description||'')} · ${paymentMethodLabels[e.paymentMethod]||e.paymentMethod} · ${escapeHtml(e.createdBy?.name||'')}</small></div><strong>-${ars(e.amount)}</strong></div>`).join('')||'<p>Sin gastos registrados.</p>';$('#shiftHistory').innerHTML=(d.shifts||[]).slice(0,10).map(s=>`<button class="shift-summary-btn" data-shift-summary="${s.id}">${new Date(s.openedAt).toLocaleDateString('es-AR')} · ${escapeHtml(s.employeeName)} · ${s.closedAt?'Cerrada':'Abierta'}</button>`).join('');$$('[data-shift-summary]').forEach(b=>b.onclick=()=>printShiftSummary(b.dataset.shiftSummary));fillFlyer(d.settings?.promoFlyer||{})}
+function renderV4Admin(d){
+  const shift=d.activeShift;
+  const cashStatus=$('#cashShiftStatus');
+  if(cashStatus) cashStatus.innerHTML=shift
+    ? `<b>Caja abierta por ${escapeHtml(shift.employeeName)}</b><small>Desde ${new Date(shift.openedAt).toLocaleString('es-AR')} · Inicial ${ars(shift.openingCash)}</small>`
+    : '<b>Caja cerrada</b><small>Abrí un turno para registrar ventas y gastos.</small>';
+
+  const openForm=$('#openShiftForm');
+  const closeForm=$('#closeShiftForm');
+  if(openForm) openForm.hidden=!!shift;
+  if(closeForm) closeForm.hidden=!shift;
+
+  const activeShiftId=$('#activeShiftId');
+  if(shift&&activeShiftId) activeShiftId.value=shift.id;
+
+  const expenseForm=$('#expenseForm');
+  if(expenseForm) expenseForm.hidden=!shift;
+
+  const expenseList=$('#expenseList');
+  if(expenseList) expenseList.innerHTML=(d.expenses||[]).slice(0,20).map(e=>`<div class="expense-row"><div><b>${escapeHtml(e.category)}</b><small>${escapeHtml(e.description||'')} · ${paymentMethodLabels[e.paymentMethod]||e.paymentMethod} · ${escapeHtml(e.createdBy?.name||'')}</small></div><strong>-${ars(e.amount)}</strong></div>`).join('')||'<p>Sin gastos registrados.</p>';
+
+  const shiftHistory=$('#shiftHistory');
+  if(shiftHistory){
+    shiftHistory.innerHTML=(d.shifts||[]).slice(0,10).map(s=>`<button class="shift-summary-btn" data-shift-summary="${s.id}">${new Date(s.openedAt).toLocaleDateString('es-AR')} · ${escapeHtml(s.employeeName)} · ${s.closedAt?'Cerrada':'Abierta'}</button>`).join('');
+    $$('[data-shift-summary]').forEach(b=>b.onclick=()=>printShiftSummary(b.dataset.shiftSummary));
+  }
+
+  try{fillFlyer(d.settings?.promoFlyer||{})}catch(e){console.warn('Flyer no bloqueó Caja:',e)}
+}
+
 async function openShift(e){e.preventDefault();try{await api('/api/admin/shifts/open',{method:'POST',body:JSON.stringify({employeeName:e.target.employeeName?.value||'',openingCash:Number(e.target.openingCash.value)})});e.target.reset();await loadAdmin();toast('Caja abierta')}catch(x){toast(x.message)}}
 async function closeShift(e){e.preventDefault();try{const r=await api(`/api/admin/shifts/${$('#activeShiftId').value}/close`,{method:'POST',body:JSON.stringify({countedCash:Number(e.target.countedCash.value)})});await loadAdmin();renderCashTicket(r);$('#ticketDialog').showModal()}catch(x){toast(x.message)}}
 async function addExpense(e){e.preventDefault();try{await api('/api/admin/expenses',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();await loadAdmin();window.dispatchEvent(new CustomEvent('frostland:admin-updated',{detail:{type:'expense'}}));toast('Gasto registrado')}catch(x){toast(x.message)}}
-function fillFlyer(f){const form=$('#flyerForm');if(!form)return;for(const [k,v]of Object.entries(f)){const el=form.elements[k];if(!el)continue;if(el.type==='checkbox')el.checked=!!v;else el.value=v||''}}
+function fillFlyer(f){
+  const form=$('#flyerForm');
+  if(!form)return;
+  for(const [k,v] of Object.entries(f||{})){
+    const el=form.elements[k];
+    if(!el)continue;
+    if(el.type==='checkbox') el.checked=!!v;
+    else if(el.type==='file') continue;
+    else el.value=v??'';
+  }
+}
 async function saveFlyer(e){e.preventDefault();const fd=new FormData(e.target),b=Object.fromEntries(fd);b.active=e.target.active.checked;const file=e.target.image?.files?.[0];if(file?.size){const up=await uploadImage(file);b.imageUrl=up.imageUrl}await api('/api/admin/flyer',{method:'PUT',body:JSON.stringify(b)});state.data=await api('/api/bootstrap');showPromoFlyer();toast('Flyer actualizado')}
 function flyerIsActive(f){if(!f?.active)return false;const n=Date.now();if(f.startAt&&n<new Date(f.startAt).getTime())return false;if(f.endAt&&n>new Date(f.endAt).getTime())return false;return true}
 function showPromoFlyer(){const f=state.data?.settings?.promoFlyer;if(!flyerIsActive(f))return;const key=`frostland-flyer-${f.frequency}-${new Date().toISOString().slice(0,10)}`;if(f.frequency!=='always'&&localStorage.getItem(key))return;$('#promoFlyerTitle').textContent=f.title||'Promoción';$('#promoFlyerText').textContent=f.text||'';$('#promoFlyerImage').src=f.imageUrl||'';$('#promoFlyerImage').hidden=!f.imageUrl;$('#promoFlyerButton').textContent=f.buttonText||'Ver oferta';$('#promoFlyerButton').href=f.buttonUrl||'#';$('#promoFlyerButton').hidden=!f.buttonText;$('#promoFlyer').hidden=false;$('#promoFlyer').dataset.storageKey=key}
