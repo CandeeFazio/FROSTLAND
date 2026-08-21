@@ -64,9 +64,11 @@ async function loadAdmin(){
     const orders=Array.isArray(d.orders)?d.orders:[];
     const lowFlavors=flavors.filter(f=>f?.active&&Number(f.bucketStock)<=Number(f.lowBucketsAt||0)).length;
 
-    $('#stats').innerHTML=[['Pedidos',d.totals?.orders||0],['Ventas',ars(d.totals?.sales||0)],['Clientes',d.totals?.customers||0],['Stock bajo',lowFlavors],['Gastos',ars(d.totals?.expenses||0)],['DINERO REAL',ars(d.totals?.realMoney||0)]].map(x=>`<div class="stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
+    const statsEl=$('#stats');
+    if(statsEl) statsEl.innerHTML=[['Pedidos',d.totals?.orders||0],['Ventas',ars(d.totals?.sales||0)],['Clientes',d.totals?.customers||0],['Stock bajo',lowFlavors],['Gastos',ars(d.totals?.expenses||0)],['DINERO REAL',ars(d.totals?.realMoney||0)]].map(x=>`<div class="stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
 
-    $('#adminOrders').innerHTML=orders.length?orders.map(o=>{
+    const adminOrdersEl=$('#adminOrders');
+    if(adminOrdersEl) adminOrdersEl.innerHTML=orders.length?orders.map(o=>{
       const customer=o.customer||{};
       const delivery=o.delivery||{};
       return `<article class="admin-order"><div><div class="admin-order-heading"><div><p class="eyebrow">${escapeHtml(o.code||'Pedido')}</p><b>${escapeHtml(customer.name||'Cliente')}</b></div>${paymentBadge(o)}</div><p>${ars(o.total)} · ${delivery.type==='delivery'?'Delivery':'Retiro'} · ${escapeHtml(paymentMethodLabels[o.paymentMethod]||o.paymentMethod||'Sin informar')}</p><div class="order-items-detail">${orderItemsHtml(o.items||[])}</div><div class="order-actions">${o.status==='received'?`<button class="accept-order" data-accept-order="${o.id}">Aceptar e imprimir 2</button>`:''}<button class="secondary" data-ticket-order="${o.id}">Ver ticket</button><button class="outline" data-chat-order="${o.id}" data-chat-code="${escapeAttr(o.code||'Pedido')}">Abrir chat</button>${o.paymentStatus!=='approved'?`<button class="mini paid-button" data-paid-order="${o.id}">Marcar pagado</button>`:''}${!['delivered','cancelled'].includes(o.status)?`<button class="mini danger" data-cancel-order="${o.id}">Cancelar</button>`:o.status==='cancelled'?`<button class="mini danger" data-archive-order="${o.id}">Archivar cancelado</button>`:''}${delivery.mapsUrl?`<a target="_blank" rel="noopener" href="${escapeAttr(delivery.mapsUrl)}">Abrir Maps</a>`:''}</div></div><select data-order="${o.id}">${Object.entries(statusLabels).map(([s,l])=>`<option value="${s}" ${s===o.status?'selected':''}>${l}</option>`).join('')}</select></article>`;

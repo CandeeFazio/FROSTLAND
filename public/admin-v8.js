@@ -17,13 +17,16 @@ function mapSections(){
   [['contenido de la página'],'v8-content'],[['productos y precios'],'v8-products'],[['stock privado de baldes'],'v8-stock']
  ];
  pairs.forEach(([titles,id])=>{const p=panelByTitle(...titles);if(p)p.id=id});
- const stats=$('#stats');if(stats)stats.id='v8-dashboard';
+ const accidental=$('#v8-dashboard');
+ if(accidental&&!$('#stats')) accidental.id='stats';
+ const stats=$('#stats');
+ if(stats) stats.dataset.v8Dashboard='1';
 }
 function makeSidebar(){
  if($('#v8Sidebar'))return;
  const a=document.createElement('aside');a.id='v8Sidebar';a.className='v8-sidebar';
  a.innerHTML=`<div class="v8-brand"><div class="v8-mark">F</div><div><b>FROSTLAND</b><small>Panel de gestión</small></div></div>
- <div class="v8-menu-group"><small>OPERACIÓN</small><button data-go="v8-dashboard">Inicio</button><button data-go="v8-orders">Pedidos</button><button data-go="v8-cash">Caja</button><button data-go="v8-sales">Ventas</button></div>
+ <div class="v8-menu-group"><small>OPERACIÓN</small><button data-go="stats">Inicio</button><button data-go="v8-orders">Pedidos</button><button data-go="v8-cash">Caja</button><button data-go="v8-sales">Ventas</button></div>
  <div class="v8-menu-group"><small>GESTIÓN</small><button data-go="v8-clients">Clientes</button><button data-go="v8-suppliers">Proveedores</button><button data-go="v8-stock">Stock y sabores</button><button data-go="v8-products">Productos y precios</button></div>
  <div class="v8-menu-group"><small>CONTROL</small><button data-go="v8-finance">Dinero y gastos</button><button data-go="v8-stock-history">Historial stock</button></div>
  <div class="v8-menu-group"><small>WEB</small><button data-go="v8-promos">Promociones</button><button data-go="v8-banners">Banners</button><button data-go="v8-content">Contenido</button><button data-go="v8-settings">Horarios y config.</button></div>`;
