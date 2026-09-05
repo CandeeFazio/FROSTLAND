@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import tls from 'node:tls';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
@@ -37,7 +38,7 @@ const DATA_FILE = path.join(DATA_DIR, 'db.json');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 
 app.set('trust proxy', 1);
-app.get('/health', (_req, res) => res.json({ ok: true, service: 'frostland', time: new Date().toISOString() }));
+app.get('/health', (_req, res) => res.json({ ok: true, service: 'carniceria-pro', time: new Date().toISOString() }));
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan('dev'));
@@ -50,7 +51,8 @@ app.get('/api/config-status', (_req, res) => {
     mercadoPagoConfigured: Boolean(String(process.env.MP_ACCESS_TOKEN || '').trim()),
     publicKeyConfigured: Boolean(String(process.env.MP_PUBLIC_KEY || '').trim()),
     envFileLoaded: loadedEnvFile,
-    publicUrl: PUBLIC_URL
+    publicUrl: PUBLIC_URL,
+    gmailConfigured: Boolean(String(process.env.GMAIL_USER||'').trim() && String(process.env.GMAIL_APP_PASSWORD||'').trim())
   });
 });
 
@@ -61,13 +63,17 @@ const money = n => Math.max(0, Math.round(Number(n) || 0));
 
 const seed = {
   settings: {
-    storeName: process.env.STORE_NAME || 'FROSTLAND',
+    storeName: process.env.STORE_NAME || 'CANFRAN',
     storeAddress: process.env.STORE_ADDRESS || 'Configurar dirección del local',
+    storePhone: process.env.STORE_PHONE || '',
+    minAdvanceHours: 24,
+    autoEmailReceipt: false,
+    receiptFooter: 'Gracias por elegir CANFRAN',
     storeLat: Number(process.env.STORE_LAT || -34.6037),
     storeLng: Number(process.env.STORE_LNG || -58.3816),
     whatsappNumber: process.env.WHATSAPP_NUMBER || '',
     instagramUrl: process.env.INSTAGRAM_URL || '',
-    instagramHandle: process.env.INSTAGRAM_HANDLE || '@frostland',
+    instagramHandle: process.env.INSTAGRAM_HANDLE || '@carniceria',
     mapsUrl: process.env.MAPS_URL || '',
     pointsPerPeso: 0.01,
     pointValue: 10,
@@ -81,6 +87,16 @@ const seed = {
     manualOpen: false,
     promoFlyer: { active: false, title: '', text: '', imageUrl: '', buttonText: '', buttonUrl: '', frequency: 'daily', startAt: '', endAt: '' },
     siteContent: {
+      brandSubtitle: 'Carnicería · Cortes · Asados',
+      heroEyebrow: 'PEDIDOS CON 24 HS DE ANTICIPACIÓN',
+      heroTitle: 'Elegí el corte.\nNosotros hacemos el resto.',
+      heroText: 'Pedí kilos aproximados, elegí cómo querés cada corte y pagá recién cuando confirmemos el peso real.',
+      heroButton: 'Ver cortes',
+      howTitle: '¿Cómo funciona?',
+      howSteps: ['Elegís producto, kilos y corte.','Recibimos y preparamos tu pedido.','Cargamos el peso real.','Te mostramos el total definitivo.','Recién ahí pagás.'],
+      noticeTitle: 'IMPORTANTE — PEDIDOS CON 24 HORAS DE ANTICIPACIÓN',
+      noticeText: 'El peso solicitado es aproximado. El importe definitivo se calculará según el peso real preparado. No pagás ahora.',
+      noticeAccept: 'Entiendo y acepto realizar el pedido con un mínimo de 24 horas de anticipación.',
       hero1Eyebrow: 'EL SABOR DE FROSTLAND',
       hero1Title: 'Momentos que se disfrutan cucharada a cucharada.',
       hero1Text: 'Armá tu combinación, elegí hasta 12 sabores y recibila donde estés.',
@@ -154,6 +170,19 @@ async function ensureDb() {
   db.cashShifts ||= [];
   db.expenses ||= [];
   db.auditLog ||= [];
+  db.inventoryMovements ||= [];
+  db.products = (db.products || []).map(p => ({
+    unitType: p.unitType || 'kg',
+    pricePerKg: Number(p.pricePerKg ?? p.price ?? 0),
+    price: Number(p.price ?? p.pricePerKg ?? 0),
+    stockKg: Number(p.stockKg ?? 0),
+    lowStockKg: Number(p.lowStockKg ?? 5),
+    committedKg: Number(p.committedKg ?? 0),
+    barcode: String(p.barcode || ''),
+    category: String(p.category || 'Carnes'),
+    cutOptions: Array.isArray(p.cutOptions) && p.cutOptions.length ? p.cutOptions : ['Entero','Parrilla','Fino'],
+    ...p
+  }));
   db.settings.promoFlyer = { ...seed.settings.promoFlyer, ...(db.settings.promoFlyer || {}) };
   const employeeSeeds = [
     { name: 'Nadia', email: String(process.env.EMPLOYEE_NADIA_EMAIL || 'nadia@frostland.local').toLowerCase(), password: process.env.EMPLOYEE_NADIA_PASSWORD || 'CambiarNadia2026!' },
@@ -443,7 +472,7 @@ app.post('/api/orders/:id/messages', auth, async (req, res) => {
   const text = String(req.body.text || '').trim().slice(0, 500);
   if (!text) return res.status(400).json({ error: 'Escribí un mensaje.' });
   order.messages ||= [];
-  const message = { id: uid(), userId: req.user.id, senderName: ['admin','employee'].includes(req.user.role) ? `FROSTLAND · ${req.user.name}` : req.user.name, senderRole: req.user.role, text, createdAt: now() };
+  const message = { id: uid(), userId: req.user.id, senderName: ['admin','employee'].includes(req.user.role) ? `${req.db.settings.storeName || 'CARNICERÍA'} · ${req.user.name}` : req.user.name, senderRole: req.user.role, text, createdAt: now() };
   order.messages.push(message); order.updatedAt = now(); await writeDb(req.db); io.to(`order:${order.id}`).emit('chat:message', { orderId: order.id, message }); res.status(201).json(message);
 });
 
@@ -689,137 +718,115 @@ app.post('/api/admin/inventory/flavor/:id/adjust', auth, role('admin','employee'
 app.post('/api/admin/users', auth, role('admin'), async (req,res)=>{ if(!['admin','employee','courier'].includes(req.body.role))return res.status(400).json({error:'Rol inválido'}); const u={id:uid(),name:req.body.name,email:req.body.email.toLowerCase(),phone:req.body.phone||'',passwordHash:await bcrypt.hash(req.body.password||'frostland123',10),role:req.body.role,points:0,createdAt:now()}; req.db.users.push(u); await writeDb(req.db); res.status(201).json(publicUser(u)); });
 
 
-// FROSTLAND_V7_PROVEEDORES
-function ensureSupplierCollections(db){
-  if(!Array.isArray(db.suppliers)) db.suppliers=[];
-  if(!Array.isArray(db.supplierReceipts)) db.supplierReceipts=[];
-  if(!Array.isArray(db.supplierPayments)) db.supplierPayments=[];
+
+// ===== COMPROBANTES CANFRAN (PDF simple + Gmail SMTP sin dependencias extra) =====
+function pdfText(v){return String(v??'').replace(/[\\()]/g,m=>'\\'+m).replace(/[\r\n]+/g,' ')}
+function latin(v){return String(v??'').normalize('NFC').replace(/[–—]/g,'-').replace(/“|”/g,'"').replace(/’/g,"'")}
+function wrapText(text,max=82){const words=latin(text).split(/\s+/),lines=[];let line='';for(const w of words){if((line+' '+w).trim().length>max){if(line)lines.push(line);line=w}else line=(line+' '+w).trim()}if(line)lines.push(line);return lines}
+function receiptLines(order,settings){
+  const final=Number(order.finalTotal||0)>0,total=final?order.finalTotal:order.totalEstimated;
+  const lines=[settings.storeName||'CANFRAN',settings.storeAddress||'',settings.storePhone?`Tel: ${settings.storePhone}`:'','COMPROBANTE DE COMPRA',`Pedido: ${order.code}`,`Fecha: ${new Date(order.createdAt).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires'})}`,`Cliente: ${order.customer?.name||''}`,`Email: ${order.customer?.email||''}`,`Telefono: ${order.customer?.phone||''}`,`Entrega: ${order.delivery?.type==='delivery'?'Delivery':'Retiro en local'}`];
+  if(order.delivery?.type==='delivery'){const a=[order.delivery.street,order.delivery.number,order.delivery.city].filter(Boolean).join(' ');if(a)lines.push(`Direccion: ${a}`);if(order.delivery.mapsLink)lines.push(`Maps: ${order.delivery.mapsLink}`)}
+  lines.push('');
+  for(const i of order.items||[]){const q=i.unitType==='kg'?(final&&i.actualKg?`${Number(i.actualKg).toLocaleString('es-AR')} kg real`:`${Number(i.requestedKg).toLocaleString('es-AR')} kg aprox.`):`x${i.qty}`;const sub=final?(i.finalSubtotal??i.estimatedSubtotal):i.estimatedSubtotal;lines.push(`${i.productName} - ${q}${i.cut?' - '+i.cut:''} - $${Number(sub||0).toLocaleString('es-AR')}`);if(i.notes)lines.push(`  Obs: ${i.notes}`)}
+  lines.push('',`${final?'TOTAL':'TOTAL ESTIMADO'}: $${Number(total||0).toLocaleString('es-AR')}`,'',settings.receiptFooter||'Gracias por elegir CANFRAN','Documento comercial interno. No reemplaza factura fiscal ARCA.');
+  return lines.flatMap(x=>wrapText(x,82));
 }
-function supplierSummary(db,s){
-  ensureSupplierCollections(db);
-  const receipts=db.supplierReceipts.filter(r=>r.supplierId===s.id);
-  const payments=db.supplierPayments.filter(p=>p.supplierId===s.id);
-  const purchased=receipts.reduce((a,r)=>a+Number(r.total||0),0);
-  const paid=payments.reduce((a,p)=>a+Number(p.amount||0),0);
-  return {...s,purchased,paid,balance:purchased-paid,receiptsCount:receipts.length,paymentsCount:payments.length};
+function createSimplePdf(lines){
+  const content=[];let y=800;content.push('BT','/F1 10 Tf');for(const raw of lines){if(y<45){break}const line=pdfText(latin(raw));content.push(`1 0 0 1 42 ${y} Tm (${line}) Tj`);y-=15}content.push('ET');const stream=content.join('\n');
+  const objects=[null,'<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',`<< /Length ${Buffer.byteLength(stream,'latin1')} >>\nstream\n${stream}\nendstream`];
+  let out='%PDF-1.4\n%âãÏÓ\n',offsets=[0];for(let i=1;i<objects.length;i++){offsets[i]=Buffer.byteLength(out,'latin1');out+=`${i} 0 obj\n${objects[i]}\nendobj\n`}const xref=Buffer.byteLength(out,'latin1');out+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;for(let i=1;i<objects.length;i++)out+=`${String(offsets[i]).padStart(10,'0')} 00000 n \n`;out+=`trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;return Buffer.from(out,'latin1')
 }
-app.get('/api/admin/suppliers', auth, role('admin','employee'), (req,res)=>{
-  ensureSupplierCollections(req.db);
-  res.json(req.db.suppliers.map(s=>supplierSummary(req.db,s)).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'es')));
-});
-app.post('/api/admin/suppliers', auth, role('admin','employee'), async (req,res)=>{
-  ensureSupplierCollections(req.db);
-  const name=String(req.body.name||'').trim(); if(!name)return res.status(400).json({error:'Ingresá el nombre del proveedor.'});
-  const supplier={id:uid(),name,contact:String(req.body.contact||'').trim(),phone:String(req.body.phone||'').trim(),email:String(req.body.email||'').trim(),cuit:String(req.body.cuit||'').trim(),notes:String(req.body.notes||'').trim(),createdAt:now(),updatedAt:now()};
-  req.db.suppliers.push(supplier); await writeDb(req.db); res.status(201).json(supplierSummary(req.db,supplier));
-});
-app.put('/api/admin/suppliers/:id', auth, role('admin','employee'), async (req,res)=>{
-  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
-  for(const k of ['name','contact','phone','email','cuit','notes']) if(req.body[k]!==undefined)s[k]=String(req.body[k]||'').trim();
-  s.updatedAt=now(); await writeDb(req.db); res.json(supplierSummary(req.db,s));
-});
-app.get('/api/admin/suppliers/:id', auth, role('admin','employee'), (req,res)=>{
-  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
-  const receipts=req.db.supplierReceipts.filter(r=>r.supplierId===s.id).sort((a,b)=>String(b.date||b.createdAt).localeCompare(String(a.date||a.createdAt)));
-  const payments=req.db.supplierPayments.filter(p=>p.supplierId===s.id).sort((a,b)=>String(b.date||b.createdAt).localeCompare(String(a.date||a.createdAt)));
-  const receiptRows=receipts.map(r=>{const paid=payments.filter(p=>p.receiptId===r.id).reduce((a,p)=>a+Number(p.amount||0),0);return {...r,paid,balance:Number(r.total||0)-paid,status:paid<=0?'pending':paid>=Number(r.total||0)?'paid':'partial'}});
-  res.json({...supplierSummary(req.db,s),receipts:receiptRows,payments});
-});
-app.post('/api/admin/suppliers/:id/receipts', auth, role('admin','employee'), async (req,res)=>{
-  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
-  const total=Math.max(0,Number(req.body.total)||0); if(!total)return res.status(400).json({error:'Ingresá el total del remito.'});
-  const r={id:uid(),supplierId:s.id,number:String(req.body.number||'').trim(),date:String(req.body.date||'').trim()||now(),total,description:String(req.body.description||'').trim(),notes:String(req.body.notes||'').trim(),createdBy:{id:req.user.id,name:req.user.name},createdAt:now()};
-  req.db.supplierReceipts.push(r); await writeDb(req.db); res.status(201).json(r);
-});
-app.post('/api/admin/suppliers/:id/payments', auth, role('admin','employee'), async (req,res)=>{
-  ensureSupplierCollections(req.db); const s=req.db.suppliers.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
-  const amount=Math.max(0,Number(req.body.amount)||0); if(!amount)return res.status(400).json({error:'Ingresá el monto entregado.'});
-  const methods=['cash','transfer','mercadopago','qr','cheque','other']; const method=methods.includes(req.body.method)?req.body.method:'other';
-  const receiptId=String(req.body.receiptId||'').trim()||null;
-  if(receiptId&&!req.db.supplierReceipts.some(r=>r.id===receiptId&&r.supplierId===s.id))return res.status(400).json({error:'El remito seleccionado no pertenece al proveedor.'});
-  const p={id:uid(),supplierId:s.id,receiptId,amount,method,reference:String(req.body.reference||'').trim(),date:String(req.body.date||'').trim()||now(),notes:String(req.body.notes||'').trim(),createdBy:{id:req.user.id,name:req.user.name},createdAt:now()};
-  req.db.supplierPayments.push(p); await writeDb(req.db); res.status(201).json(p);
-});
+function smtpWait(socket,expect){return new Promise((resolve,reject)=>{let buf='';const onData=d=>{buf+=d.toString();const lines=buf.split(/\r?\n/).filter(Boolean);const last=lines[lines.length-1]||'';if(/^\d{3} /.test(last)){cleanup();const code=Number(last.slice(0,3));if(expect.includes(code))resolve(buf);else reject(new Error(`Gmail SMTP ${code}: ${last.slice(4)}`))}};const onErr=e=>{cleanup();reject(e)};const cleanup=()=>{socket.off('data',onData);socket.off('error',onErr)};socket.on('data',onData);socket.on('error',onErr)})}
+async function smtpCmd(socket,cmd,expect=[250]){if(cmd!==null)socket.write(cmd+'\r\n');return smtpWait(socket,expect)}
+async function sendGmailReceipt(to,subject,text,pdfBuffer,filename){const user=String(process.env.GMAIL_USER||'').trim(),pass=String(process.env.GMAIL_APP_PASSWORD||'').replace(/\s/g,'');if(!user||!pass)throw new Error('Gmail no está configurado en el servidor.');const socket=tls.connect({host:'smtp.gmail.com',port:465,servername:'smtp.gmail.com'});await smtpCmd(socket,null,[220]);await smtpCmd(socket,'EHLO canfran');await smtpCmd(socket,'AUTH LOGIN',[334]);await smtpCmd(socket,Buffer.from(user).toString('base64'),[334]);await smtpCmd(socket,Buffer.from(pass).toString('base64'),[235]);await smtpCmd(socket,`MAIL FROM:<${user}>`);await smtpCmd(socket,`RCPT TO:<${to}>`,[250,251]);await smtpCmd(socket,'DATA',[354]);const boundary='----CANFRAN'+Date.now();const safeSubject=Buffer.from(subject).toString('base64');let msg=`From: CANFRAN <${user}>\r\nTo: <${to}>\r\nSubject: =?UTF-8?B?${safeSubject}?=\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${Buffer.from(text).toString('base64').match(/.{1,76}/g).join('\r\n')}\r\n--${boundary}\r\nContent-Type: application/pdf; name="${filename}"\r\nContent-Disposition: attachment; filename="${filename}"\r\nContent-Transfer-Encoding: base64\r\n\r\n${pdfBuffer.toString('base64').match(/.{1,76}/g).join('\r\n')}\r\n--${boundary}--\r\n`;msg=msg.split('\n.').join('\n..');socket.write(msg+'\r\n.\r\n');await smtpWait(socket,[250]);socket.write('QUIT\r\n');socket.end()}
+async function sendOrderReceipt(order,settings){if(!order.customer?.email)throw new Error('El cliente no tiene email cargado.');const pdf=createSimplePdf(receiptLines(order,settings));await sendGmailReceipt(order.customer.email,`Comprobante CANFRAN ${order.code}`,`Hola ${order.customer?.name||''}. Adjuntamos el comprobante de tu pedido ${order.code}.`,pdf,`CANFRAN_${order.code}.pdf`);order.receiptEmailSentAt=now();order.receiptEmailTo=order.customer.email;order.receiptEmailLastError='';return pdf}
 
-
-
-// FROSTLAND_V73_DELETE_SUPPLIERS
-app.delete('/api/admin/suppliers/:id', auth, role('admin'), async (req,res)=>{
-  ensureSupplierCollections(req.db);
-  const s=req.db.suppliers.find(x=>x.id===req.params.id);
-  if(!s)return res.status(404).json({error:'Proveedor no encontrado.'});
-
-  const receipts=req.db.supplierReceipts.filter(r=>r.supplierId===s.id);
-  const payments=req.db.supplierPayments.filter(p=>p.supplierId===s.id);
-
-  if(receipts.length || payments.length){
-    return res.status(409).json({
-      error:`No se puede eliminar ${s.name} porque tiene ${receipts.length} remito(s) y ${payments.length} pago(s).`,
-      receipts:receipts.length,
-      payments:payments.length
-    });
+// ===== CARNICERIA PRO: pedidos por peso, stock comprometido y código de barras =====
+const kg3 = n => Math.max(0, Math.round((Number(n)||0)*1000)/1000);
+function meatProductPublic(p){
+  return { id:p.id,name:p.name,description:p.description||'',imageUrl:p.imageUrl||'',active:p.active!==false,category:p.category||'Carnes',unitType:p.unitType||'kg',pricePerKg:Number(p.pricePerKg??p.price??0),price:Number(p.price??p.pricePerKg??0),stockKg:kg3(p.stockKg),committedKg:kg3(p.committedKg),availableKg:kg3(Number(p.stockKg||0)-Number(p.committedKg||0)),lowStockKg:kg3(p.lowStockKg||5),barcode:p.barcode||'',cutOptions:Array.isArray(p.cutOptions)?p.cutOptions:[] };
+}
+function releaseCommitted(db, order){
+  if(order.committedReleased)return;
+  for(const item of order.items||[]){
+    if(item.unitType!=='kg')continue;
+    const p=db.products.find(x=>x.id===item.productId); if(!p)continue;
+    p.committedKg=kg3(Math.max(0,Number(p.committedKg||0)-Number(item.requestedKg||0)));
   }
-
-  req.db.suppliers=req.db.suppliers.filter(x=>x.id!==s.id);
-  await writeDb(req.db);
-  res.json({ok:true,deletedId:s.id,name:s.name});
-});
-
-app.post('/api/admin/suppliers-clean-duplicates', auth, role('admin'), async (req,res)=>{
-  ensureSupplierCollections(req.db);
-
-  const norm=v=>String(v||'').trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/\s+/g,' ');
-
-  const groups=new Map();
-  for(const s of req.db.suppliers){
-    const key=norm(s.name);
-    if(!key)continue;
-    if(!groups.has(key))groups.set(key,[]);
-    groups.get(key).push(s);
-  }
-
-  const removed=[];
-  const kept=[];
-
-  for(const [key,list] of groups){
-    if(list.length<2)continue;
-
-    list.sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||'')));
-
-    const withMovements=list.filter(s=>
-      req.db.supplierReceipts.some(r=>r.supplierId===s.id) ||
-      req.db.supplierPayments.some(p=>p.supplierId===s.id)
-    );
-
-    const keep=withMovements[0] || list[0];
-    kept.push({id:keep.id,name:keep.name});
-
-    for(const s of list){
-      if(s.id===keep.id)continue;
-      const hasMovements=
-        req.db.supplierReceipts.some(r=>r.supplierId===s.id) ||
-        req.db.supplierPayments.some(p=>p.supplierId===s.id);
-
-      if(!hasMovements){
-        req.db.suppliers=req.db.suppliers.filter(x=>x.id!==s.id);
-        removed.push({id:s.id,name:s.name});
-      }
+  order.committedReleased=true;
+}
+function meatAdminSnapshot(db){
+  const orders=[...(db.orders||[])].filter(o=>o.systemType==='meat').sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const products=(db.products||[]).map(meatProductPublic);
+  return { orders, products, inventoryMovements:[...(db.inventoryMovements||[])].sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).slice(0,250), users:(db.users||[]).map(publicUser), settings:db.settings,
+    metrics:{newOrders:orders.filter(o=>['received','accepted'].includes(o.status)).length,preparing:orders.filter(o=>o.status==='preparing').length,awaitingPayment:orders.filter(o=>o.status==='awaiting_payment').length,ready:orders.filter(o=>o.status==='ready').length,lowStock:products.filter(p=>p.unitType==='kg'&&p.availableKg<=p.lowStockKg).length,committedKg:kg3(products.reduce((a,p)=>a+Number(p.committedKg||0),0))}
+  };
+}
+app.get('/api/meat/bootstrap', async (_req,res)=>{const db=await readDb();res.json({settings:db.settings,products:(db.products||[]).filter(p=>p.active!==false).map(meatProductPublic),availability:storeAvailability(db.settings)});});
+app.post('/api/meat/orders', auth, async (req,res)=>{
+  try{
+    if(!req.body.ack24h)throw new Error('Tenés que aceptar que el pedido se realiza con 24 horas de anticipación.');
+    const requestedFor=new Date(req.body.requestedFor||''); const minHours=Math.max(1,Number(req.db.settings.minAdvanceHours||24)); if(Number.isNaN(requestedFor.getTime())||requestedFor.getTime()<Date.now()+minHours*3600000-60000)throw new Error(`Elegí una fecha/hora de retiro o entrega con al menos ${minHours} horas de anticipación.`);
+    const items=[]; let estimatedSubtotal=0;
+    for(const raw of req.body.items||[]){const p=req.db.products.find(x=>x.id===raw.productId&&x.active!==false);if(!p)throw new Error('Hay un producto inválido.');
+      if((p.unitType||'kg')==='kg'){const requestedKg=kg3(raw.requestedKg);if(requestedKg<=0)throw new Error(`${p.name}: indicá los kg aproximados.`);const available=Number(p.stockKg||0)-Number(p.committedKg||0);if(requestedKg>available+0.0001)throw new Error(`${p.name}: solo quedan ${kg3(available)} kg disponibles.`);const cut=String(raw.cut||'Entero').slice(0,80);const est=money(requestedKg*Number(p.pricePerKg??p.price??0));items.push({id:uid(),productId:p.id,productName:p.name,unitType:'kg',requestedKg,actualKg:null,cut,notes:String(raw.notes||'').slice(0,250),unitPrice:Number(p.pricePerKg??p.price??0),estimatedSubtotal:est,finalSubtotal:null});estimatedSubtotal+=est;p.committedKg=kg3(Number(p.committedKg||0)+requestedKg);}
+      else{const qty=Math.max(1,Math.min(50,Math.trunc(Number(raw.qty)||1)));const est=money(qty*Number(p.price||0));items.push({id:uid(),productId:p.id,productName:p.name,unitType:'unit',qty,actualQty:qty,notes:String(raw.notes||'').slice(0,250),unitPrice:Number(p.price||0),estimatedSubtotal:est,finalSubtotal:est});estimatedSubtotal+=est;}
     }
-  }
-
-  await writeDb(req.db);
-  res.json({ok:true,removed,kept});
+    if(!items.length)throw new Error('El carrito está vacío.');
+    const delivery=req.body.delivery||{}; if(!['pickup','delivery'].includes(delivery.type))throw new Error('Elegí retiro o delivery.');
+    const order={id:uid(),code:`CA-${Date.now().toString().slice(-7)}`,systemType:'meat',userId:req.user.id,customer:publicUser(req.user),items,estimatedSubtotal,totalEstimated:estimatedSubtotal,finalTotal:null,paymentMethod:null,paymentStatus:'awaiting_weight',status:'received',requestedFor:requestedFor.toISOString(),ack24h:true,delivery:{type:delivery.type,street:String(delivery.street||''),number:String(delivery.number||''),city:String(delivery.city||''),notes:String(delivery.notes||''),mapsLink:String(delivery.mapsLink||'').slice(0,600),latitude:Number.isFinite(Number(delivery.latitude))?Number(delivery.latitude):null,longitude:Number.isFinite(Number(delivery.longitude))?Number(delivery.longitude):null},customerNotes:String(req.body.customerNotes||'').slice(0,500),createdAt:now(),updatedAt:now(),timeline:[{status:'received',at:now(),by:req.user.name}]};
+    req.db.orders.push(order); await writeDb(req.db); io.to('staff').emit('admin:new-order',{order:{id:order.id,code:order.code,total:order.totalEstimated,createdAt:order.createdAt}});res.status(201).json(order);
+  }catch(e){res.status(400).json({error:e.message});}
 });
-
+app.get('/api/meat/my-orders', auth, (req,res)=>res.json(req.db.orders.filter(o=>o.systemType==='meat'&&o.userId===req.user.id).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))));
+app.post('/api/meat/orders/:id/pay', auth, async (req,res)=>{
+  const order=req.db.orders.find(o=>o.id===req.params.id&&o.systemType==='meat');if(!order)return res.status(404).json({error:'Pedido no encontrado.'});if(order.userId!==req.user.id&&!['admin','employee'].includes(req.user.role))return res.status(403).json({error:'Sin acceso.'});if(order.status!=='awaiting_payment'||!order.finalTotal)return res.status(400).json({error:'El pedido todavía no tiene importe definitivo.'});
+  const method=String(req.body.paymentMethod||'');if(!['cash','mercadopago','qr','transfer'].includes(method))return res.status(400).json({error:'Medio de pago inválido.'});order.paymentMethod=method;order.paymentStatus=method==='cash'?'pending_cash':(method==='mercadopago'?'pending':'pending_local');order.updatedAt=now();
+  if(method==='mercadopago'){
+    const token=String(process.env.MP_ACCESS_TOKEN||'').trim();if(!token){await writeDb(req.db);return res.json({order,warning:'Mercado Pago no está configurado.'});}const client=new MercadoPagoConfig({accessToken:token});const preference=new Preference(client);const base=/^https:\/\//i.test(PUBLIC_URL)?PUBLIC_URL:`${req.protocol}://${req.get('host')}`;const body={items:[{id:order.id,title:`Pedido ${order.code}`,quantity:1,unit_price:Number(order.finalTotal),currency_id:'ARS'}],external_reference:order.id,metadata:{order_id:order.id}};if(/^https:\/\//i.test(base)){body.back_urls={success:`${base}/?payment=success&order=${order.id}`,pending:`${base}/?payment=pending&order=${order.id}`,failure:`${base}/?payment=failure&order=${order.id}`};body.auto_return='approved';body.notification_url=`${base}/api/mercadopago/webhook`;}const r=await preference.create({body});order.mpPreferenceId=r.id;order.mpInitPoint=r.init_point;await writeDb(req.db);return res.json({order,checkoutUrl:r.init_point});
+  }
+  await writeDb(req.db); if(method==='transfer'){const wa=String(req.db.settings.whatsappNumber||'').replace(/\D/g,'');return res.json({order,checkoutUrl:wa?`https://wa.me/${wa}?text=${encodeURIComponent(`Hola, quiero pagar el pedido ${order.code} por $${Number(order.finalTotal).toLocaleString('es-AR')}. ¿Me pasan el alias?`)}`:null});}res.json({order});
+});
+app.get('/api/meat/admin/orders/:id/receipt.pdf', auth, role('admin','employee'), async (req,res)=>{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)return res.status(404).json({error:'Pedido no encontrado.'});const pdf=createSimplePdf(receiptLines(o,req.db.settings));res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`attachment; filename="CANFRAN_${o.code}.pdf"`);res.send(pdf)});
+app.post('/api/meat/admin/orders/:id/email-receipt', auth, role('admin','employee'), async (req,res)=>{try{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)throw new Error('Pedido no encontrado.');await sendOrderReceipt(o,req.db.settings);await writeDb(req.db);res.json({ok:true,to:o.customer.email,sentAt:o.receiptEmailSentAt})}catch(e){res.status(400).json({error:e.message})}});
+app.put('/api/meat/admin/settings', auth, role('admin','employee'), async (req,res)=>{
+  const body=req.body||{};
+  const allowed=['storeName','storeAddress','storePhone','whatsappNumber','instagramHandle','instagramUrl','mapsUrl','receiptFooter'];
+  for(const k of allowed) if(k in body) req.db.settings[k]=String(body[k]??'').slice(0,1000);
+  if(body.minAdvanceHours!==undefined) req.db.settings.minAdvanceHours=Math.max(1,Math.min(168,Math.round(Number(body.minAdvanceHours)||24)));
+  if(body.autoEmailReceipt!==undefined) req.db.settings.autoEmailReceipt=Boolean(body.autoEmailReceipt);
+  if(body.siteContent&&typeof body.siteContent==='object'){
+    req.db.settings.siteContent={...(req.db.settings.siteContent||{}),...body.siteContent};
+    if(Array.isArray(body.siteContent.howSteps)) req.db.settings.siteContent.howSteps=body.siteContent.howSteps.map(x=>String(x).slice(0,180)).slice(0,10);
+  }
+  await writeDb(req.db);
+  res.json(req.db.settings);
+});
+app.get('/api/meat/admin/dashboard', auth, role('admin','employee'), (req,res)=>res.json(meatAdminSnapshot(req.db)));
+app.post('/api/meat/admin/orders/:id/accept', auth, role('admin','employee'), async (req,res)=>{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)return res.status(404).json({error:'Pedido no encontrado.'});o.status='accepted';o.acceptedAt=now();o.acceptedBy={id:req.user.id,name:req.user.name};o.timeline||=[];o.timeline.push({status:'accepted',at:now(),by:req.user.name});o.updatedAt=now();await writeDb(req.db);res.json(o);});
+app.post('/api/meat/admin/orders/:id/preparing', auth, role('admin','employee'), async (req,res)=>{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)return res.status(404).json({error:'Pedido no encontrado.'});o.status='preparing';o.timeline||=[];o.timeline.push({status:'preparing',at:now(),by:req.user.name});o.updatedAt=now();await writeDb(req.db);res.json(o);});
+app.post('/api/meat/admin/orders/:id/finalize', auth, role('admin','employee'), async (req,res)=>{
+  try{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)throw new Error('Pedido no encontrado.');const weights=req.body.weights||{};let total=0;
+    for(const item of o.items||[]){const p=req.db.products.find(x=>x.id===item.productId);if(!p)throw new Error(`No existe ${item.productName}.`);if(item.unitType==='kg'){const actual=kg3(weights[item.id]);if(actual<=0)throw new Error(`Cargá el peso real de ${item.productName}.`);if(actual>Number(p.stockKg||0)+0.0001)throw new Error(`Stock insuficiente de ${item.productName}.`);item.actualKg=actual;item.finalSubtotal=money(actual*Number(item.unitPrice||0));total+=item.finalSubtotal;p.stockKg=kg3(Number(p.stockKg||0)-actual);p.committedKg=kg3(Math.max(0,Number(p.committedKg||0)-Number(item.requestedKg||0)));req.db.inventoryMovements.push({id:uid(),productId:p.id,productName:p.name,type:'exit',kg:actual,reason:'Pedido preparado',reference:o.code,barcode:p.barcode||'',createdBy:{id:req.user.id,name:req.user.name},createdAt:now(),stockAfter:p.stockKg});}else total+=Number(item.finalSubtotal||0);}
+    o.committedReleased=true;o.finalTotal=money(total);o.status='awaiting_payment';o.paymentStatus='awaiting_payment';o.finalizedAt=now();o.timeline||=[];o.timeline.push({status:'awaiting_payment',at:now(),by:req.user.name});o.updatedAt=now();if(req.db.settings.autoEmailReceipt&&o.customer?.email){try{await sendOrderReceipt(o,req.db.settings)}catch(mailErr){o.receiptEmailLastError=mailErr.message;console.error('No se pudo enviar comprobante automático:',mailErr.message)}}await writeDb(req.db);io.to(`order:${o.id}`).emit('order:update',o);res.json(o);
+  }catch(e){res.status(400).json({error:e.message});}
+});
+app.post('/api/meat/admin/orders/:id/ready', auth, role('admin','employee'), async (req,res)=>{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)return res.status(404).json({error:'Pedido no encontrado.'});o.status='ready';o.timeline||=[];o.timeline.push({status:'ready',at:now(),by:req.user.name});o.updatedAt=now();await writeDb(req.db);res.json(o);});
+app.post('/api/meat/admin/orders/:id/delivered', auth, role('admin','employee'), async (req,res)=>{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)return res.status(404).json({error:'Pedido no encontrado.'});o.status='delivered';o.timeline||=[];o.timeline.push({status:'delivered',at:now(),by:req.user.name});o.updatedAt=now();await writeDb(req.db);res.json(o);});
+app.post('/api/meat/admin/orders/:id/cancel', auth, role('admin','employee'), async (req,res)=>{const o=req.db.orders.find(x=>x.id===req.params.id&&x.systemType==='meat');if(!o)return res.status(404).json({error:'Pedido no encontrado.'});if(!o.committedReleased)releaseCommitted(req.db,o);o.status='cancelled';o.updatedAt=now();await writeDb(req.db);res.json(o);});
+app.post('/api/meat/admin/products', auth, role('admin','employee'), async (req,res)=>{const p={id:uid(),name:String(req.body.name||'').trim(),description:String(req.body.description||'').trim(),imageUrl:String(req.body.imageUrl||'').trim(),category:String(req.body.category||'Carnes').trim(),unitType:req.body.unitType==='unit'?'unit':'kg',pricePerKg:money(req.body.pricePerKg??req.body.price),price:money(req.body.price??req.body.pricePerKg),stockKg:kg3(req.body.stockKg),committedKg:0,lowStockKg:kg3(req.body.lowStockKg||5),barcode:String(req.body.barcode||'').trim(),cutOptions:Array.isArray(req.body.cutOptions)?req.body.cutOptions.map(String).filter(Boolean):['Entero','Parrilla','Fino'],active:req.body.active!==false};if(!p.name)return res.status(400).json({error:'Ingresá el nombre.'});req.db.products.push(p);await writeDb(req.db);res.status(201).json(meatProductPublic(p));});
+app.put('/api/meat/admin/products/:id', auth, role('admin','employee'), async (req,res)=>{const p=req.db.products.find(x=>x.id===req.params.id);if(!p)return res.status(404).json({error:'Producto no encontrado.'});for(const k of ['name','description','imageUrl','category','barcode'])if(req.body[k]!==undefined)p[k]=String(req.body[k]);if(req.body.unitType!==undefined)p.unitType=req.body.unitType==='unit'?'unit':'kg';if(req.body.pricePerKg!==undefined){p.pricePerKg=money(req.body.pricePerKg);p.price=p.pricePerKg;}if(req.body.price!==undefined)p.price=money(req.body.price);if(req.body.stockKg!==undefined&&p.unitType==='kg'){const next=kg3(req.body.stockKg),delta=kg3(next-Number(p.stockKg||0));if(Math.abs(delta)>0.0001){p.stockKg=next;req.db.inventoryMovements.push({id:uid(),productId:p.id,productName:p.name,type:delta>0?'entry':'exit',kg:kg3(Math.abs(delta)),reason:'Stock editado desde producto',reference:'EDICIÓN',barcode:p.barcode||'',createdBy:{id:req.user.id,name:req.user.name},createdAt:now(),stockAfter:p.stockKg});}}if(req.body.lowStockKg!==undefined)p.lowStockKg=kg3(req.body.lowStockKg);if(req.body.cutOptions!==undefined)p.cutOptions=Array.isArray(req.body.cutOptions)?req.body.cutOptions.map(String).filter(Boolean):[];if(req.body.active!==undefined)p.active=Boolean(req.body.active);await writeDb(req.db);res.json(meatProductPublic(p));});
+app.delete('/api/meat/admin/products/:id', auth, role('admin','employee'), async (req,res)=>{const p=req.db.products.find(x=>x.id===req.params.id);if(!p)return res.status(404).json({error:'Producto no encontrado.'});p.active=false;await writeDb(req.db);res.sendStatus(204);});
+app.post('/api/meat/admin/inventory/scan', auth, role('admin','employee'), async (req,res)=>{const barcode=String(req.body.barcode||'').trim();const p=req.db.products.find(x=>String(x.barcode||'')===barcode);if(!p)return res.status(404).json({error:'No hay producto asociado a ese código de barras.'});const type=req.body.type==='exit'?'exit':'entry';const kg=kg3(req.body.kg);if(kg<=0)return res.status(400).json({error:'Ingresá los kg.'});if(type==='exit'&&kg>Number(p.stockKg||0))return res.status(400).json({error:'Stock insuficiente.'});p.stockKg=kg3(Number(p.stockKg||0)+(type==='entry'?kg:-kg));const m={id:uid(),productId:p.id,productName:p.name,type,kg,reason:String(req.body.reason|| (type==='entry'?'Ingreso por escaneo':'Salida por escaneo')).slice(0,150),reference:String(req.body.reference||'').slice(0,120),barcode,createdBy:{id:req.user.id,name:req.user.name},createdAt:now(),stockAfter:p.stockKg};req.db.inventoryMovements.push(m);await writeDb(req.db);res.json({product:meatProductPublic(p),movement:m});});
+app.post('/api/meat/admin/inventory/:id/adjust', auth, role('admin','employee'), async (req,res)=>{const p=req.db.products.find(x=>x.id===req.params.id);if(!p)return res.status(404).json({error:'Producto no encontrado.'});const delta=Number(req.body.deltaKg);if(!Number.isFinite(delta)||delta===0)return res.status(400).json({error:'Ingresá un ajuste.'});if(Number(p.stockKg||0)+delta<0)return res.status(400).json({error:'El stock no puede quedar negativo.'});p.stockKg=kg3(Number(p.stockKg||0)+delta);const m={id:uid(),productId:p.id,productName:p.name,type:delta>0?'entry':'exit',kg:kg3(Math.abs(delta)),reason:String(req.body.reason||'Ajuste manual').slice(0,150),reference:'AJUSTE',barcode:p.barcode||'',createdBy:{id:req.user.id,name:req.user.name},createdAt:now(),stockAfter:p.stockKg};req.db.inventoryMovements.push(m);await writeDb(req.db);res.json({product:meatProductPublic(p),movement:m});});
 
 app.get('/{*splat}', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 await initFirebase();
 await ensureDb();
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`FROSTLAND funcionando en ${PUBLIC_URL}`);
+  console.log(`CARNICERÍA PRO funcionando en ${PUBLIC_URL}`);
   console.log(`Archivo de configuración: ${loadedEnvFile || 'NO ENCONTRADO (.env o .env.txt)'}`);
   console.log(`Mercado Pago: ${String(process.env.MP_ACCESS_TOKEN || '').trim() ? 'CONFIGURADO' : 'SIN CREDENCIALES'}`);
   if (!/^https:\/\//i.test(PUBLIC_URL)) console.log('Mercado Pago: retorno automático desactivado en localhost; el checkout igualmente puede abrirse.');
